@@ -1,0 +1,18 @@
+[package]
+name = "yson"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+proptest = "1.11.0"
+criterion = "0.8.2"
+ryu = "1.0.23"
+itoa = "1.0.18"
+
+[[bench]]
+name = "yson_benchmark"
+harness = false
