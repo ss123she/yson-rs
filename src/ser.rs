@@ -218,32 +218,16 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         value: &T,
     ) -> Result<(), Self::Error> {
-        if self.is_binary {
-            self.output.push(0x7B);
-        } else {
-            self.output.push(b'{');
-        }
+        self.output.push(b'{');
         self.write_string(variant);
-        if self.is_binary {
-            self.output.push(0x3D);
-        } else {
-            self.output.push(b'=');
-        }
+        self.output.push(b'=');
         value.serialize(&mut *self)?;
-        if self.is_binary {
-            self.output.push(0x7D);
-        } else {
-            self.output.push(b'}');
-        }
+        self.output.push(b'}');
         Ok(())
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        if self.is_binary {
-            self.output.push(0x5B);
-        } else {
-            self.output.push(b'[');
-        }
+        self.output.push(b'[');
         Ok(Compound {
             ser: self,
             first: true,
@@ -270,22 +254,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        if self.is_binary {
-            self.output.push(0x7B);
-        } else {
-            self.output.push(b'{');
-        }
+        self.output.push(b'{');
         self.write_string(variant);
-        if self.is_binary {
-            self.output.push(0x3D);
-        } else {
-            self.output.push(b'=');
-        }
-        if self.is_binary {
-            self.output.push(0x5B);
-        } else {
-            self.output.push(b'[');
-        }
+        self.output.push(b'=');
+        self.output.push(b'[');
         Ok(Compound {
             ser: self,
             first: true,
@@ -298,11 +270,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         let is_attr = self.is_writing_attributes;
         self.is_writing_attributes = false;
 
-        let open = if is_attr {
-            if self.is_binary { 0x3C } else { b'<' }
-        } else {
-            if self.is_binary { 0x7B } else { b'{' }
-        };
+        let open = if is_attr { b'<' } else { b'{' };
         self.output.push(open);
         Ok(Compound {
             ser: self,
@@ -335,22 +303,10 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        if self.is_binary {
-            self.output.push(0x7B);
-        } else {
-            self.output.push(b'{');
-        }
+        self.output.push(b'{');
         self.write_string(variant);
-        if self.is_binary {
-            self.output.push(0x3D);
-        } else {
-            self.output.push(b'=');
-        }
-        if self.is_binary {
-            self.output.push(0x7B);
-        } else {
-            self.output.push(b'{');
-        }
+        self.output.push(b'=');
+        self.output.push(b'{');
         Ok(Compound {
             ser: self,
             first: true,
@@ -372,21 +328,13 @@ impl<'a> ser::SerializeSeq for Compound<'a> {
     type Error = YsonError;
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
         if !self.first {
-            if self.ser.is_binary {
-                self.ser.output.push(0x3B);
-            } else {
-                self.ser.output.push(b';');
-            }
+            self.ser.output.push(b';');
         }
         self.first = false;
         value.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        if self.ser.is_binary {
-            self.ser.output.push(0x5D);
-        } else {
-            self.ser.output.push(b']');
-        }
+        self.ser.output.push(b']');
         Ok(())
     }
 }
@@ -433,29 +381,17 @@ impl<'a> ser::SerializeMap for Compound<'a> {
     type Error = YsonError;
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
         if !self.first {
-            if self.ser.is_binary {
-                self.ser.output.push(0x3B);
-            } else {
-                self.ser.output.push(b';');
-            }
+            self.ser.output.push(b';');
         }
         self.first = false;
         key.serialize(&mut *self.ser)
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
-        if self.ser.is_binary {
-            self.ser.output.push(0x3D);
-        } else {
-            self.ser.output.push(b'=');
-        }
+        self.ser.output.push(b'=');
         value.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        let close = if self.is_attributes {
-            if self.ser.is_binary { 0x3E } else { b'>' }
-        } else {
-            if self.ser.is_binary { 0x7D } else { b'}' }
-        };
+        let close = if self.is_attributes { b'>' } else { b'}' };
         self.ser.output.push(close);
         Ok(())
     }
@@ -481,20 +417,12 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
         }
 
         if !self.first {
-            if self.ser.is_binary {
-                self.ser.output.push(0x3B);
-            } else {
-                self.ser.output.push(b';');
-            }
+            self.ser.output.push(0x3B);
         }
         self.first = false;
 
         self.ser.write_string(key);
-        if self.ser.is_binary {
-            self.ser.output.push(0x3D);
-        } else {
-            self.ser.output.push(b'=');
-        }
+        self.ser.output.push(0x3D);
         value.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
@@ -502,11 +430,7 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
             return Ok(());
         }
 
-        let close = if self.is_attributes {
-            if self.ser.is_binary { 0x3E } else { b'>' }
-        } else {
-            if self.ser.is_binary { 0x7D } else { b'}' }
-        };
+        let close = if self.is_attributes { b'>' } else { b'}' };
         self.ser.output.push(close);
         Ok(())
     }

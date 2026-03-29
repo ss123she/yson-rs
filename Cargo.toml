@@ -12,7 +12,11 @@ proptest = "1.11.0"
 criterion = "0.8.2"
 ryu = "1.0.23"
 itoa = "1.0.18"
+memchr = "2.8.0"
 
 [[bench]]
 name = "yson_benchmark"
 harness = false
+
+[profile.release]
+debug = true

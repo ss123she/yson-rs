@@ -1,27 +1,39 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, hint::black_box};
+use std::hint::black_box;
 use yson::{de::Deserializer, ser::Serializer};
 
+use std::collections::HashMap;
+
 #[derive(Serialize, Deserialize, Clone)]
-struct BenchData {
+struct BenchData<'a> {
     id: u64,
-    name: String,
-    tags: Vec<String>,
-    properties: BTreeMap<String, f64>,
+    #[serde(borrow)]
+    name: &'a str,
+    #[serde(borrow)]
+    tags: Vec<&'a str>,
+    #[serde(borrow)]
+    properties: HashMap<&'a str, f64>,
 }
 
-fn generate_data() -> Vec<BenchData> {
+fn leak_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+fn generate_data() -> Vec<BenchData<'static>> {
     (0..10_000)
-        .map(|i| BenchData {
-            id: i,
-            name: format!("Item-{}", i),
-            tags: vec!["fast".into(), "rust".into(), "serde".into()],
-            properties: BTreeMap::from([
-                ("x".into(), 10.5),
-                ("y".into(), 20.1),
-                ("velocity".into(), 99.9),
-            ]),
+        .map(|i| {
+            let mut props = HashMap::new();
+            props.insert("x", 10.5);
+            props.insert("y", 20.1);
+            props.insert("velocity", 99.9);
+
+            BenchData {
+                id: i,
+                name: leak_str(format!("Item-{}", i)),
+                tags: vec!["fast", "rust", "serde"],
+                properties: props,
+            }
         })
         .collect()
 }

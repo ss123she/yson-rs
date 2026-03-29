@@ -2,7 +2,10 @@ use serde::{
     Deserialize, Serialize,
     de::{self, SeqAccess, Visitor},
 };
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WithAttributes<T, A> {
@@ -56,5 +59,19 @@ where
             &["$attributes", "$value"],
             WAVisitor(PhantomData),
         )
+    }
+}
+
+impl<V, A> Deref for WithAttributes<V, A> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<V, A> DerefMut for WithAttributes<V, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }

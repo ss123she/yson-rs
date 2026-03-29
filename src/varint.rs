@@ -1,5 +1,6 @@
 use crate::error::YsonError;
 
+#[inline(always)]
 pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
     let mut result: u64 = 0;
     let mut shift = 0;
@@ -22,6 +23,7 @@ pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
     ))
 }
 
+#[inline(always)]
 pub fn read_varint(input: &[u8]) -> Result<(i64, usize), YsonError> {
     let (u_val, consumed) = read_uvarint(input)?;
     let val = ((u_val >> 1) as i64) ^ (-((u_val & 1) as i64));
@@ -36,6 +38,7 @@ fn test_uvarint() {
     assert_eq!(n, 2);
 }
 
+#[inline(always)]
 pub fn write_uvarint(mut val: u64, buf: &mut Vec<u8>) {
     while val >= 0x80 {
         buf.push((val as u8) | 0x80);
@@ -44,6 +47,7 @@ pub fn write_uvarint(mut val: u64, buf: &mut Vec<u8>) {
     buf.push(val as u8);
 }
 
+#[inline(always)]
 pub fn write_varint(val: i64, buf: &mut Vec<u8>) {
     let zigzag = ((val << 1) ^ (val >> 63)) as u64;
     write_uvarint(zigzag, buf);

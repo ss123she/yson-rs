@@ -6,7 +6,6 @@ pub struct YsonIterator<'a> {
     input: &'a [u8],
     pos: usize,
     pub(crate) is_binary: bool,
-    peeked: Option<Result<Token<'a>, YsonError>>,
 }
 
 impl<'a> YsonIterator<'a> {
@@ -15,38 +14,30 @@ impl<'a> YsonIterator<'a> {
             input,
             pos: 0,
             is_binary,
-            peeked: None,
         }
     }
 
-    pub fn peek(&mut self) -> Result<&Token<'a>, YsonError> {
-        if self.peeked.is_none() {
-            self.peeked = Some(self.next_token_impl());
-        }
-
-        self.peeked
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .map_err(|e| e.clone())
+    pub fn pos(self) -> usize {
+        self.pos
     }
 
-    pub fn next_token(&mut self) -> Result<Token<'a>, YsonError> {
-        if let Some(token) = self.peeked.take() {
-            return token;
-        }
-        self.next_token_impl()
-    }
-
-    fn next_token_impl(&mut self) -> Result<Token<'a>, YsonError> {
+    pub fn peek_byte(&mut self) -> Result<u8, YsonError> {
         if !self.is_binary {
             self.skip_ignored();
         }
-
         if self.pos >= self.input.len() {
             return Err(YsonError::Eof);
         }
+        Ok(self.input[self.pos])
+    }
 
+    pub fn next_token(&mut self) -> Result<Token<'a>, YsonError> {
+        if !self.is_binary {
+            self.skip_ignored();
+        }
+        if self.pos >= self.input.len() {
+            return Err(YsonError::Eof);
+        }
         if self.is_binary {
             self.parse_binary_token()
         } else {
@@ -172,12 +163,6 @@ impl<'a> YsonIterator<'a> {
             _ if byte.is_ascii_alphabetic() || byte == b'_' => self.parse_text_unquoted_string(),
 
             _ => Err(YsonError::InvalidMarker(byte, self.pos)),
-        }
-    }
-
-    pub fn skip_whitespace(&mut self) {
-        while self.pos < self.input.len() && self.input[self.pos].is_ascii_whitespace() {
-            self.pos += 1;
         }
     }
 

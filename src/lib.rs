@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use crate::{de::Deserializer, error::YsonError};
 
+pub mod access;
 pub mod attributes;
 pub mod de;
 pub mod error;

@@ -1,13 +1,14 @@
-use std::borrow::Cow;
-
-use crate::error::YsonError;
 use crate::lexer::YsonIterator;
 use crate::node::Token;
+use crate::{access::FlatStructAccess, error::YsonError};
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use std::borrow::Cow;
 
 pub struct Deserializer<'de> {
     pub lexer: YsonIterator<'de>,
     pub is_reading_attributes: bool,
+    depth: usize,
+    max_depth: usize,
 }
 
 impl<'de> Deserializer<'de> {
@@ -15,20 +16,43 @@ impl<'de> Deserializer<'de> {
         Deserializer {
             lexer: YsonIterator::new(input, is_binary),
             is_reading_attributes: false,
+            depth: 0,
+            max_depth: 128,
         }
     }
 
+    pub fn parse_t<T: de::Deserialize<'de>>(&mut self) -> Result<T, YsonError> {
+        T::deserialize(self)
+    }
+
+    pub fn enter_recursion(&mut self) -> Result<(), YsonError> {
+        self.depth += 1;
+        if self.depth > self.max_depth {
+            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+        }
+        Ok(())
+    }
+
+    pub fn leave_recursion(&mut self) {
+        self.depth -= 1;
+    }
+
     fn skip_attributes(&mut self) -> Result<(), YsonError> {
-        if self.lexer.peek()? == &Token::BeginAttributes {
+        if self.lexer.peek_byte()? == b'<' {
+            self.enter_recursion()?;
             self.lexer.next_token()?;
-            let mut depth = 1;
-            while depth > 0 {
+            let mut attr_depth = 1;
+            while attr_depth > 0 {
                 match self.lexer.next_token()? {
-                    Token::BeginAttributes => depth += 1,
-                    Token::EndAttributes => depth -= 1,
+                    Token::BeginAttributes => attr_depth += 1,
+                    Token::EndAttributes => attr_depth -= 1,
                     _ => {}
                 }
+                if attr_depth > self.max_depth {
+                    return Err(YsonError::Custom("Attributes nesting too deep".into()));
+                }
             }
+            self.leave_recursion();
         }
         Ok(())
     }
@@ -45,11 +69,11 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         self.is_reading_attributes = false;
 
         if was_reading_attributes {
-            if self.lexer.peek()? != &Token::BeginAttributes {
+            if self.lexer.peek_byte()? != b'<' {
                 return visitor.visit_map(EmptyMapAccess);
             }
             self.lexer.next_token()?;
-            return visitor.visit_map(CommaSeparated::new(self, Token::EndAttributes));
+            return visitor.visit_map(CommaSeparated::new(self, b'>')?);
         }
 
         self.skip_attributes()?;
@@ -73,11 +97,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                     Err(e) => visitor.visit_byte_buf(e.into_bytes()),
                 },
             },
-            Token::BeginList => visitor.visit_seq(CommaSeparated::new(self, Token::EndList)),
-            Token::BeginMap => visitor.visit_map(CommaSeparated::new(self, Token::EndMap)),
-            Token::BeginAttributes => {
-                visitor.visit_map(CommaSeparated::new(self, Token::EndAttributes))
-            }
+            Token::BeginList => visitor.visit_seq(CommaSeparated::new(self, b']')?),
+            Token::BeginMap => visitor.visit_map(CommaSeparated::new(self, b'}')?),
+            Token::BeginAttributes => visitor.visit_map(CommaSeparated::new(self, b'>')?),
             t => Err(YsonError::Custom(format!("Unexpected token: {:?}", t))),
         }
     }
@@ -90,7 +112,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         self.is_reading_attributes = false;
 
         if was_reading_attributes {
-            if self.lexer.peek()? == &Token::BeginAttributes {
+            if self.lexer.peek_byte()? == b'<' {
                 self.is_reading_attributes = true;
                 let res = visitor.visit_some(&mut *self);
                 self.is_reading_attributes = false;
@@ -100,7 +122,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             }
         } else {
             self.skip_attributes()?;
-            if self.lexer.peek()? == &Token::Entity {
+            if self.lexer.peek_byte()? == b'#' {
                 self.lexer.next_token()?;
                 visitor.visit_none()
             } else {
@@ -112,15 +134,19 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     fn deserialize_struct<V>(
         self,
         name: &'static str,
-        _fields: &'static [&'static str],
+        fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
         if name == "$__yson_attributes" {
-            return visitor.visit_seq(AttributesWrapperAccess { de: self, state: 0 });
+            return visitor.visit_seq(AttributesWrapperAccess::new(self)?);
         }
+        if fields.iter().any(|f| f.starts_with('@')) {
+            return visitor.visit_map(FlatStructAccess::new(self)?);
+        }
+
         self.deserialize_any(visitor)
     }
 
@@ -153,6 +179,19 @@ struct AttributesWrapperAccess<'a, 'de: 'a> {
     state: u8,
 }
 
+impl<'a, 'de> AttributesWrapperAccess<'a, 'de> {
+    fn new(de: &'a mut Deserializer<'de>) -> Result<Self, YsonError> {
+        de.enter_recursion()?;
+        Ok(AttributesWrapperAccess { de, state: 0 })
+    }
+}
+
+impl<'a, 'de> Drop for AttributesWrapperAccess<'a, 'de> {
+    fn drop(&mut self) {
+        self.de.leave_recursion();
+    }
+}
+
 impl<'de, 'a> SeqAccess<'de> for AttributesWrapperAccess<'a, 'de> {
     type Error = YsonError;
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -179,56 +218,125 @@ impl<'de, 'a> SeqAccess<'de> for AttributesWrapperAccess<'a, 'de> {
 
 struct CommaSeparated<'a, 'de: 'a> {
     de: &'a mut Deserializer<'de>,
-    end_token: Token<'static>,
+    end_byte: u8,
 }
 
 impl<'a, 'de> CommaSeparated<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>, end_token: Token<'static>) -> Self {
-        CommaSeparated { de, end_token }
+    fn new(de: &'a mut Deserializer<'de>, end_byte: u8) -> Result<Self, YsonError> {
+        de.enter_recursion()?;
+        Ok(CommaSeparated { de, end_byte })
     }
 }
 
-impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
-    type Error = YsonError;
-    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        if self.de.lexer.peek()? == &self.end_token {
-            self.de.lexer.next_token()?;
-            return Ok(None);
-        }
-        let value = seed.deserialize(&mut *self.de)?;
-        if self.de.lexer.peek()? == &Token::ItemSeparator {
-            self.de.lexer.next_token()?;
-        }
-        Ok(Some(value))
+impl<'a, 'de> Drop for CommaSeparated<'a, 'de> {
+    fn drop(&mut self) {
+        self.de.leave_recursion();
     }
 }
 
 impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
     type Error = YsonError;
+
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
         K: DeserializeSeed<'de>,
     {
-        if self.de.lexer.peek()? == &self.end_token {
+        let peeked = self.de.lexer.peek_byte()?;
+        if peeked == self.end_byte {
             self.de.lexer.next_token()?;
             return Ok(None);
         }
+
+        if peeked == b';' {
+            self.de.lexer.next_token()?;
+
+            if self.de.lexer.peek_byte()? == self.end_byte {
+                self.de.lexer.next_token()?;
+                return Ok(None);
+            }
+        }
+
         seed.deserialize(&mut *self.de).map(Some)
     }
+
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
         V: DeserializeSeed<'de>,
     {
-        if self.de.lexer.next_token()? != Token::KeyValueSeparator {
-            return Err(YsonError::Custom("Expected '='".into()));
+        let token = self.de.lexer.next_token()?;
+        if token != Token::KeyValueSeparator {
+            return Err(YsonError::Custom(format!("Expected '=', got {:?}", token)));
         }
-        let value = seed.deserialize(&mut *self.de)?;
-        if self.de.lexer.peek()? == &Token::ItemSeparator {
+
+        seed.deserialize(&mut *self.de)
+    }
+}
+
+impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
+    type Error = YsonError;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: DeserializeSeed<'de>,
+    {
+        let peeked = self.de.lexer.peek_byte()?;
+        if peeked == self.end_byte {
             self.de.lexer.next_token()?;
+            return Ok(None);
         }
-        Ok(value)
+
+        if peeked == b';' {
+            self.de.lexer.next_token()?;
+
+            if self.de.lexer.peek_byte()? == self.end_byte {
+                self.de.lexer.next_token()?;
+                return Ok(None);
+            }
+        }
+
+        seed.deserialize(&mut *self.de).map(Some)
+    }
+}
+
+pub struct StreamDeserializer<'de, T> {
+    de: Deserializer<'de>,
+    first: bool,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<'de, T> StreamDeserializer<'de, T>
+where
+    T: de::Deserialize<'de>,
+{
+    pub fn new(input: &'de [u8], is_binary: bool) -> Self {
+        Self {
+            de: Deserializer::from_bytes(input, is_binary),
+            first: true,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn next_item(&mut self) -> Result<Option<T>, YsonError> {
+        let peek_res = self.de.lexer.peek_byte();
+
+        if matches!(peek_res, Err(YsonError::Eof)) {
+            return Ok(None);
+        }
+
+        let next_byte = peek_res?;
+
+        if self.first {
+            self.first = false;
+        } else {
+            if next_byte == b';' {
+                self.de.lexer.next_token()?;
+                if matches!(self.de.lexer.peek_byte(), Err(YsonError::Eof)) {
+                    return Ok(None);
+                }
+            }
+        }
+
+        let item = T::deserialize(&mut self.de)?;
+        Ok(Some(item))
     }
 }
