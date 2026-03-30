@@ -1,4 +1,6 @@
-use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, value::StringDeserializer};
+use serde::de::{
+    self, DeserializeSeed, IntoDeserializer, MapAccess, Visitor, value::StringDeserializer,
+};
 use std::borrow::Cow;
 
 use crate::{de::Deserializer, error::YsonError, node::Token};
@@ -145,5 +147,86 @@ impl<'de, 'a> MapAccess<'de> for FlatStructAccess<'a, 'de> {
             return Err(YsonError::Custom(format!("Expected '=', got {:?}", token)));
         }
         seed.deserialize(&mut *self.de)
+    }
+}
+
+pub(crate) struct EnumAccess<'a, 'de: 'a> {
+    de: &'a mut Deserializer<'de>,
+    is_map_wrapped: bool,
+}
+
+impl<'a, 'de> EnumAccess<'a, 'de> {
+    pub(crate) fn new(de: &'a mut Deserializer<'de>, is_map_wrapped: bool) -> Self {
+        EnumAccess { de, is_map_wrapped }
+    }
+}
+
+impl<'de, 'a> de::EnumAccess<'de> for EnumAccess<'a, 'de> {
+    type Error = YsonError;
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let val = seed.deserialize(&mut *self.de)?;
+        Ok((val, self))
+    }
+}
+
+impl<'de, 'a> de::VariantAccess<'de> for EnumAccess<'a, 'de> {
+    type Error = YsonError;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        if self.is_map_wrapped {
+            let token = self.de.lexer.next_token()?;
+            if token != Token::KeyValueSeparator {
+                return Err(YsonError::Custom("Expected '='".into()));
+            }
+            let val_token = self.de.lexer.next_token()?;
+            if val_token != Token::Entity {
+                return Err(YsonError::Custom(
+                    "Expected '#' for unit variant in map".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        let token = self.de.lexer.next_token()?;
+        if token != Token::KeyValueSeparator {
+            return Err(YsonError::Custom("Expected '='".into()));
+        }
+        seed.deserialize(self.de)
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        let token = self.de.lexer.next_token()?;
+        if token != Token::KeyValueSeparator {
+            return Err(YsonError::Custom("Expected '='".into()));
+        }
+        de::Deserializer::deserialize_seq(self.de, visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        let token = self.de.lexer.next_token()?;
+        if token != Token::KeyValueSeparator {
+            return Err(YsonError::Custom("Expected '='".into()));
+        }
+        de::Deserializer::deserialize_map(self.de, visitor)
     }
 }

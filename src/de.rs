@@ -1,8 +1,11 @@
+use crate::access::EnumAccess;
 use crate::lexer::YsonIterator;
-use crate::node::Token;
+use crate::node::{Token, YsonNode, YsonValue};
 use crate::{access::FlatStructAccess, error::YsonError};
+use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 pub struct Deserializer<'de> {
     pub lexer: YsonIterator<'de>,
@@ -25,7 +28,7 @@ impl<'de> Deserializer<'de> {
         T::deserialize(self)
     }
 
-    pub fn enter_recursion(&mut self) -> Result<(), YsonError> {
+    pub(crate) fn enter_recursion(&mut self) -> Result<(), YsonError> {
         self.depth += 1;
         if self.depth > self.max_depth {
             return Err(YsonError::Custom("Recursion limit exceeded".into()));
@@ -33,7 +36,7 @@ impl<'de> Deserializer<'de> {
         Ok(())
     }
 
-    pub fn leave_recursion(&mut self) {
+    pub(crate) fn leave_recursion(&mut self) {
         self.depth -= 1;
     }
 
@@ -76,7 +79,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             return visitor.visit_map(CommaSeparated::new(self, b'>')?);
         }
 
-        self.skip_attributes()?;
+        if self.lexer.peek_byte()? == b'<' {
+            return visitor.visit_map(FlatStructAccess::new(self)?);
+        }
 
         match self.lexer.next_token()? {
             Token::Entity => visitor.visit_unit(),
@@ -150,10 +155,33 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         self.deserialize_any(visitor)
     }
 
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.skip_attributes()?;
+        let peeked = self.lexer.peek_byte()?;
+        if peeked == b'{' {
+            self.lexer.next_token()?;
+            let val = visitor.visit_enum(EnumAccess::new(self, true))?;
+            if self.lexer.next_token()? != Token::EndMap {
+                return Err(YsonError::Custom("Expected '}' after variant".into()));
+            }
+            Ok(val)
+        } else {
+            visitor.visit_enum(EnumAccess::new(self, false))
+        }
+    }
+
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         bytes byte_buf unit unit_struct newtype_struct seq tuple
-        tuple_struct map enum identifier ignored_any
+        tuple_struct map identifier ignored_any
     }
 }
 
@@ -338,5 +366,136 @@ where
 
         let item = T::deserialize(&mut self.de)?;
         Ok(Some(item))
+    }
+}
+
+impl<'de> Deserialize<'de> for YsonValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct YsonValueVisitor;
+
+        impl<'de> Visitor<'de> for YsonValueVisitor {
+            type Value = YsonValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("any YSON value")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::Boolean(v),
+                })
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::Int64(v),
+                })
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::Uint64(v),
+                })
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::Double(v),
+                })
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::String(v.as_bytes().to_vec()),
+                })
+            }
+
+            fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::String(v.to_vec()),
+                })
+            }
+
+            fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::String(v),
+                })
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::Entity,
+                })
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut vec = Vec::new();
+                while let Some(elem) = seq.next_element()? {
+                    vec.push(elem);
+                }
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::List(vec),
+                })
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut attributes = BTreeMap::new();
+                let mut plain_map = BTreeMap::new();
+                let mut body_node = None;
+                let mut is_attributed = false;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    if let Some(attr_name) = key.strip_prefix('@') {
+                        is_attributed = true;
+                        attributes.insert(attr_name.as_bytes().to_vec(), map.next_value()?);
+                    } else if key == "$value" {
+                        is_attributed = true;
+                        let val: YsonValue = map.next_value()?;
+                        body_node = Some(val.node);
+                        if let Some(inner_attrs) = val.attributes {
+                            attributes.extend(inner_attrs);
+                        }
+                    } else {
+                        plain_map.insert(key.into_bytes(), map.next_value()?);
+                    }
+                }
+
+                if is_attributed {
+                    Ok(YsonValue {
+                        attributes: if attributes.is_empty() {
+                            None
+                        } else {
+                            Some(attributes)
+                        },
+                        node: body_node.unwrap_or(YsonNode::Entity),
+                    })
+                } else {
+                    Ok(YsonValue {
+                        attributes: None,
+                        node: YsonNode::Map(plain_map),
+                    })
+                }
+            }
+        }
+
+        deserializer.deserialize_any(YsonValueVisitor)
     }
 }

@@ -1,6 +1,9 @@
-use serde::Deserialize;
+#[cfg(all(not(debug_assertions), not(test)))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use crate::{de::Deserializer, error::YsonError};
+use serde::Deserialize;
 
 pub mod access;
 pub mod attributes;

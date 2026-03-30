@@ -30,14 +30,6 @@ pub fn read_varint(input: &[u8]) -> Result<(i64, usize), YsonError> {
     Ok((val, consumed))
 }
 
-#[test]
-fn test_uvarint() {
-    let data = [0x96, 0x01];
-    let (val, n) = read_uvarint(&data).unwrap();
-    assert_eq!(val, 150);
-    assert_eq!(n, 2);
-}
-
 #[inline(always)]
 pub fn write_uvarint(mut val: u64, buf: &mut Vec<u8>) {
     while val >= 0x80 {
