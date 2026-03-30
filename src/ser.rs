@@ -1,6 +1,11 @@
 use crate::error::YsonError;
 use serde::{Serialize, ser};
 
+pub enum YsonFormat {
+    Binary,
+    Text,
+}
+
 pub struct Serializer {
     pub output: Vec<u8>,
     pub is_binary: bool,
@@ -16,6 +21,7 @@ impl Serializer {
         }
     }
 
+    #[inline]
     fn write_entity(&mut self) {
         self.output.push(0x23);
     }
@@ -34,8 +40,8 @@ impl Serializer {
             self.output.push(0x02);
             crate::varint::write_varint(v, &mut self.output);
         } else {
-            let mut buffer = itoa::Buffer::new();
-            self.output.extend_from_slice(buffer.format(v).as_bytes());
+            self.output
+                .extend_from_slice(itoa::Buffer::new().format(v).as_bytes());
         }
     }
 
@@ -44,8 +50,8 @@ impl Serializer {
             self.output.push(0x06);
             crate::varint::write_uvarint(v, &mut self.output);
         } else {
-            let mut buffer = itoa::Buffer::new();
-            self.output.extend_from_slice(buffer.format(v).as_bytes());
+            self.output
+                .extend_from_slice(itoa::Buffer::new().format(v).as_bytes());
             self.output.push(b'u');
         }
     }
@@ -57,16 +63,15 @@ impl Serializer {
         } else if v.is_nan() {
             self.output.extend_from_slice(b"%nan");
         } else if v.is_infinite() {
-            if v.is_sign_negative() {
-                self.output.extend_from_slice(b"%-inf");
+            self.output.extend_from_slice(if v.is_sign_negative() {
+                b"%-inf"
             } else {
-                self.output.extend_from_slice(b"%inf");
-            }
+                b"%inf"
+            });
         } else {
-            let mut buffer = ryu::Buffer::new();
-            let s = buffer.format(v);
+            let s = ryu::Buffer::new().format(v).to_owned();
             self.output.extend_from_slice(s.as_bytes());
-            if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+            if !s.contains(&['.', 'e', 'E'][..]) {
                 self.output.extend_from_slice(b".0");
             }
         }
@@ -77,41 +82,43 @@ impl Serializer {
             self.output.push(0x01);
             crate::varint::write_varint(v.len() as i64, &mut self.output);
             self.output.extend_from_slice(v.as_bytes());
+        } else if is_safe_unquoted(v.as_bytes()) {
+            self.output.extend_from_slice(v.as_bytes());
         } else {
-            let bytes = v.as_bytes();
-            let safe = !bytes.is_empty()
-                && (bytes[0].is_ascii_alphabetic() || bytes[0] == b'_')
-                && bytes
-                    .iter()
-                    .all(|&b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.');
-
-            if safe {
-                self.output.extend_from_slice(bytes);
-            } else {
-                self.output.push(b'"');
-                for &b in bytes {
-                    match b {
-                        b'"' => self.output.extend_from_slice(b"\\\""),
-                        b'\\' => self.output.extend_from_slice(b"\\\\"),
-                        b'\n' => self.output.extend_from_slice(b"\\n"),
-                        b'\r' => self.output.extend_from_slice(b"\\r"),
-                        b'\t' => self.output.extend_from_slice(b"\\t"),
-                        0x00..=0x1F => {
-                            const HEX: &[u8] = b"0123456789abcdef";
-                            self.output.extend_from_slice(&[
-                                b'\\',
-                                b'x',
-                                HEX[(b >> 4) as usize],
-                                HEX[(b & 0x0F) as usize],
-                            ]);
-                        }
-                        _ => self.output.push(b),
+            self.output.push(b'"');
+            for &b in v.as_bytes() {
+                match b {
+                    b'"' => self.output.extend_from_slice(b"\\\""),
+                    b'\\' => self.output.extend_from_slice(b"\\\\"),
+                    b'\n' => self.output.extend_from_slice(b"\\n"),
+                    b'\r' => self.output.extend_from_slice(b"\\r"),
+                    b'\t' => self.output.extend_from_slice(b"\\t"),
+                    0x00..=0x1F => {
+                        const HEX: &[u8] = b"0123456789abcdef";
+                        self.output.extend_from_slice(&[
+                            b'\\',
+                            b'x',
+                            HEX[(b >> 4) as usize],
+                            HEX[(b & 0x0F) as usize],
+                        ]);
                     }
+                    _ => self.output.push(b),
                 }
-                self.output.push(b'"');
             }
+            self.output.push(b'"');
         }
     }
+}
+
+macro_rules! impl_serialize {
+    // Numbers
+    ($($name:ident($ty:ty) => $method:ident as $cast:ty),*) => {
+        $(fn $name(self, v: $ty) -> Result<(), Self::Error> { self.$method(v as $cast); Ok(()) })*
+    };
+    // None, Unit
+    (@empty $($name:ident $(($($arg:ident: $ty:ty),*))?),*) => {
+        $(fn $name(self $(, $($arg: $ty),*)?) -> Result<(), Self::Error> { self.write_entity(); Ok(()) })*
+    };
 }
 
 impl<'a> ser::Serializer for &'a mut Serializer {
@@ -125,48 +132,18 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeStruct = Compound<'a>;
     type SerializeStructVariant = Compound<'a>;
 
+    impl_serialize! {
+        serialize_i8(i8) => write_i64 as i64, serialize_i16(i16) => write_i64 as i64,
+        serialize_i32(i32) => write_i64 as i64, serialize_i64(i64) => write_i64 as i64,
+        serialize_u8(u8) => write_u64 as u64, serialize_u16(u16) => write_u64 as u64,
+        serialize_u32(u32) => write_u64 as u64, serialize_u64(u64) => write_u64 as u64,
+        serialize_f32(f32) => write_f64 as f64, serialize_f64(f64) => write_f64 as f64
+    }
+
+    impl_serialize!(@empty serialize_none, serialize_unit, serialize_unit_struct(_n: &'static str));
+
     fn serialize_bool(self, v: bool) -> Result<(), Self::Error> {
         self.write_bool(v);
-        Ok(())
-    }
-    fn serialize_i8(self, v: i8) -> Result<(), Self::Error> {
-        self.write_i64(v as i64);
-        Ok(())
-    }
-    fn serialize_i16(self, v: i16) -> Result<(), Self::Error> {
-        self.write_i64(v as i64);
-        Ok(())
-    }
-    fn serialize_i32(self, v: i32) -> Result<(), Self::Error> {
-        self.write_i64(v as i64);
-        Ok(())
-    }
-    fn serialize_i64(self, v: i64) -> Result<(), Self::Error> {
-        self.write_i64(v);
-        Ok(())
-    }
-    fn serialize_u8(self, v: u8) -> Result<(), Self::Error> {
-        self.write_u64(v as u64);
-        Ok(())
-    }
-    fn serialize_u16(self, v: u16) -> Result<(), Self::Error> {
-        self.write_u64(v as u64);
-        Ok(())
-    }
-    fn serialize_u32(self, v: u32) -> Result<(), Self::Error> {
-        self.write_u64(v as u64);
-        Ok(())
-    }
-    fn serialize_u64(self, v: u64) -> Result<(), Self::Error> {
-        self.write_u64(v);
-        Ok(())
-    }
-    fn serialize_f32(self, v: f32) -> Result<(), Self::Error> {
-        self.write_f64(v as f64);
-        Ok(())
-    }
-    fn serialize_f64(self, v: f64) -> Result<(), Self::Error> {
-        self.write_f64(v);
         Ok(())
     }
     fn serialize_char(self, v: char) -> Result<(), Self::Error> {
@@ -177,32 +154,49 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.write_string(v);
         Ok(())
     }
+
     fn serialize_bytes(self, v: &[u8]) -> Result<(), Self::Error> {
         if self.is_binary {
             self.output.push(0x01);
             crate::varint::write_varint(v.len() as i64, &mut self.output);
             self.output.extend_from_slice(v);
         } else {
-            self.write_string(&String::from_utf8_lossy(v));
+            self.output.push(b'"');
+            for &b in v {
+                match b {
+                    b'"' => self.output.extend_from_slice(b"\\\""),
+                    b'\\' => self.output.extend_from_slice(b"\\\\"),
+                    b'\n' => self.output.extend_from_slice(b"\\n"),
+                    b'\r' => self.output.extend_from_slice(b"\\r"),
+                    b'\t' => self.output.extend_from_slice(b"\\t"),
+                    0x20..=0x7E => self.output.push(b),
+                    _ => {
+                        const HEX: &[u8] = b"0123456789abcdef";
+                        self.output.extend_from_slice(&[
+                            b'\\',
+                            b'x',
+                            HEX[(b >> 4) as usize],
+                            HEX[(b & 0x0F) as usize],
+                        ]);
+                    }
+                }
+            }
+            self.output.push(b'"');
         }
         Ok(())
     }
 
-    fn serialize_none(self) -> Result<(), Self::Error> {
-        self.write_entity();
-        Ok(())
+    fn serialize_some<T: ?Sized + Serialize>(self, v: &T) -> Result<(), Self::Error> {
+        v.serialize(self)
     }
-    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<(), Self::Error> {
-        value.serialize(self)
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        v: &T,
+    ) -> Result<(), Self::Error> {
+        v.serialize(self)
     }
-    fn serialize_unit(self) -> Result<(), Self::Error> {
-        self.write_entity();
-        Ok(())
-    }
-    fn serialize_unit_struct(self, _: &'static str) -> Result<(), Self::Error> {
-        self.write_entity();
-        Ok(())
-    }
+
     fn serialize_unit_variant(
         self,
         _: &'static str,
@@ -212,25 +206,18 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.write_string(variant);
         Ok(())
     }
-    fn serialize_newtype_struct<T: ?Sized + Serialize>(
-        self,
-        _: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error> {
-        value.serialize(self)
-    }
 
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
         _: &'static str,
         _: u32,
-        variant: &'static str,
-        value: &T,
+        var: &'static str,
+        val: &T,
     ) -> Result<(), Self::Error> {
         self.output.push(b'{');
-        self.write_string(variant);
+        self.write_string(var);
         self.output.push(b'=');
-        value.serialize(&mut *self)?;
+        val.serialize(&mut *self)?;
         self.output.push(b'}');
         Ok(())
     }
@@ -259,13 +246,12 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _: &'static str,
         _: u32,
-        variant: &'static str,
+        var: &'static str,
         _: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         self.output.push(b'{');
-        self.write_string(variant);
-        self.output.push(b'=');
-        self.output.push(b'[');
+        self.write_string(var);
+        self.output.extend_from_slice(b"=[");
         Ok(Compound {
             ser: self,
             first: true,
@@ -274,17 +260,12 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        let open = if self.is_writing_attributes {
-            b'<'
+        let (open, mode) = if self.is_writing_attributes {
+            (b'<', CompoundMode::Attr)
         } else {
-            b'{'
+            (b'{', CompoundMode::Map)
         };
         self.output.push(open);
-        let mode = if self.is_writing_attributes {
-            CompoundMode::Attr
-        } else {
-            CompoundMode::Map
-        };
         self.is_writing_attributes = false;
         Ok(Compound {
             ser: self,
@@ -296,33 +277,24 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_struct(
         self,
         name: &'static str,
-        _fields: usize,
+        _: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        if name == "$__yson_attributes" {
-            return Ok(Compound {
-                ser: self,
-                first: true,
-                mode: CompoundMode::AttrWrapper,
-            });
-        }
-
-        if self.is_writing_attributes {
+        let mode = if name == "$__yson_attributes" {
+            CompoundMode::AttrWrapper
+        } else if self.is_writing_attributes {
             self.output.push(b'<');
             self.is_writing_attributes = false;
-            return Ok(Compound {
-                ser: self,
-                first: true,
-                mode: CompoundMode::Attr,
-            });
-        }
-
+            CompoundMode::Attr
+        } else {
+            CompoundMode::Struct {
+                attr_open: false,
+                body_open: false,
+            }
+        };
         Ok(Compound {
             ser: self,
             first: true,
-            mode: CompoundMode::Struct {
-                attr_open: false,
-                body_open: false,
-            },
+            mode,
         })
     }
 
@@ -330,13 +302,12 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self,
         _: &'static str,
         _: u32,
-        variant: &'static str,
+        var: &'static str,
         _: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.output.push(b'{');
-        self.write_string(variant);
-        self.output.push(b'=');
-        self.output.push(b'{');
+        self.write_string(var);
+        self.output.extend_from_slice(b"={");
         Ok(Compound {
             ser: self,
             first: true,
@@ -345,6 +316,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 }
 
+#[derive(Clone, Copy)]
 enum CompoundMode {
     Seq,
     Map,
@@ -371,15 +343,25 @@ impl<'a> Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeSeq for Compound<'a> {
+macro_rules! delegate_seq {
+    ($($trait:ident),*) => {
+        $(impl<'a> ser::$trait for Compound<'a> {
+            type Ok = (); type Error = YsonError;
+            fn serialize_element<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
+                self.check_first(); v.serialize(&mut *self.ser)
+            }
+            fn end(self) -> Result<(), Self::Error> { self.ser.output.push(b']'); Ok(()) }
+        })*
+    };
+}
+delegate_seq!(SerializeSeq, SerializeTuple);
+
+impl<'a> ser::SerializeTupleStruct for Compound<'a> {
     type Ok = ();
     type Error = YsonError;
-    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
-        if !self.first {
-            self.ser.output.push(b';');
-        }
-        self.first = false;
-        value.serialize(&mut *self.ser)
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
+        self.check_first();
+        v.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
         self.ser.output.push(b']');
@@ -387,33 +369,12 @@ impl<'a> ser::SerializeSeq for Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeTuple for Compound<'a> {
-    type Ok = ();
-    type Error = YsonError;
-    fn serialize_element<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
-        ser::SerializeSeq::serialize_element(self, v)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        ser::SerializeSeq::end(self)
-    }
-}
-
-impl<'a> ser::SerializeTupleStruct for Compound<'a> {
-    type Ok = ();
-    type Error = YsonError;
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
-        ser::SerializeSeq::serialize_element(self, v)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        ser::SerializeSeq::end(self)
-    }
-}
-
 impl<'a> ser::SerializeTupleVariant for Compound<'a> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
-        ser::SerializeSeq::serialize_element(self, v)
+        self.check_first();
+        v.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
         self.ser.output.extend_from_slice(b"]}");
@@ -425,10 +386,7 @@ impl<'a> ser::SerializeMap for Compound<'a> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
-        if !self.first {
-            self.ser.output.push(b';');
-        }
-        self.first = false;
+        self.check_first();
         key.serialize(&mut *self.ser)
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
@@ -436,10 +394,13 @@ impl<'a> ser::SerializeMap for Compound<'a> {
         value.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        self.ser.output.push(match self.mode {
-            CompoundMode::Attr => b'>',
-            _ => b'}',
-        });
+        self.ser
+            .output
+            .push(if matches!(self.mode, CompoundMode::Attr) {
+                b'>'
+            } else {
+                b'}'
+            });
         Ok(())
     }
 }
@@ -447,12 +408,13 @@ impl<'a> ser::SerializeMap for Compound<'a> {
 impl<'a> ser::SerializeStruct for Compound<'a> {
     type Ok = ();
     type Error = YsonError;
+
     fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
         key: &'static str,
         value: &T,
     ) -> Result<(), Self::Error> {
-        match &mut self.mode {
+        match self.mode {
             CompoundMode::AttrWrapper => {
                 if key == "$attributes" {
                     self.ser.is_writing_attributes = true;
@@ -461,65 +423,47 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
                     value.serialize(&mut *self.ser)?;
                 }
             }
-            CompoundMode::Attr => {
-                if !self.first {
-                    self.ser.output.push(b';');
-                }
-                self.ser.write_string(key);
-                self.ser.output.push(b'=');
-                value.serialize(&mut *self.ser)?;
-                self.first = false;
-            }
             CompoundMode::Struct {
-                attr_open,
-                body_open,
+                mut attr_open,
+                mut body_open,
             } => {
                 if let Some(attr_name) = key.strip_prefix('@') {
-                    if !*attr_open {
+                    if !attr_open {
                         self.ser.output.push(b'<');
-                        *attr_open = true;
+                        attr_open = true;
                         self.first = true;
                     }
-                    if !self.first {
-                        self.ser.output.push(b';');
-                    }
+                    self.check_first();
                     self.ser.write_string(attr_name);
                     self.ser.output.push(b'=');
-                    value.serialize(&mut *self.ser)?;
-                    self.first = false;
-                } else if key == "$value" {
-                    if *attr_open {
-                        self.ser.output.push(b'>');
-                        *attr_open = false;
-                    }
-                    value.serialize(&mut *self.ser)?;
                 } else {
-                    if *attr_open {
+                    if attr_open {
                         self.ser.output.push(b'>');
-                        *attr_open = false;
+                        attr_open = false;
                     }
-                    if !*body_open {
-                        self.ser.output.push(b'{');
-                        *body_open = true;
-                        self.first = true;
+                    if key != "$value" {
+                        if !body_open {
+                            self.ser.output.push(b'{');
+                            body_open = true;
+                            self.first = true;
+                        }
+                        self.check_first();
+                        self.ser.write_string(key);
+                        self.ser.output.push(b'=');
                     }
-                    if !self.first {
-                        self.ser.output.push(b';');
-                    }
-                    self.ser.write_string(key);
-                    self.ser.output.push(b'=');
-                    value.serialize(&mut *self.ser)?;
-                    self.first = false;
                 }
+
+                self.mode = CompoundMode::Struct {
+                    attr_open,
+                    body_open,
+                };
+                value.serialize(&mut *self.ser)?;
             }
             _ => {
-                if !self.first {
-                    self.ser.output.push(b';');
-                }
+                self.check_first();
                 self.ser.write_string(key);
                 self.ser.output.push(b'=');
                 value.serialize(&mut *self.ser)?;
-                self.first = false;
             }
         }
         Ok(())
@@ -528,7 +472,6 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
     fn end(self) -> Result<(), Self::Error> {
         match self.mode {
             CompoundMode::Attr => self.ser.output.push(b'>'),
-            CompoundMode::AttrWrapper => {}
             CompoundMode::Seq | CompoundMode::VariantSeq => self.ser.output.push(b']'),
             CompoundMode::Struct {
                 attr_open,
@@ -540,8 +483,8 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
                 if body_open {
                     self.ser.output.push(b'}');
                 }
-                if !attr_open && !body_open {}
             }
+            CompoundMode::AttrWrapper => {}
             _ => self.ser.output.push(b'}'),
         }
         Ok(())
@@ -562,4 +505,10 @@ impl<'a> ser::SerializeStructVariant for Compound<'a> {
         self.ser.output.extend_from_slice(b"}}");
         Ok(())
     }
+}
+
+fn is_safe_unquoted(b: &[u8]) -> bool {
+    matches!(b.first(), Some(f) if f.is_ascii_alphabetic() || *f == b'_')
+        && b.iter()
+            .all(|&c| c.is_ascii_alphanumeric() || b"_-.".contains(&c))
 }

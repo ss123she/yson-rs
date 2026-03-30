@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::{error::YsonError, node::Token};
 
-pub struct YsonIterator<'a> {
+pub(crate) struct YsonIterator<'a> {
     input: &'a [u8],
     pos: usize,
     pub(crate) is_binary: bool,
@@ -17,11 +17,7 @@ impl<'a> YsonIterator<'a> {
         }
     }
 
-    pub fn pos(self) -> usize {
-        self.pos
-    }
-
-    pub fn peek_byte(&mut self) -> Result<u8, YsonError> {
+    pub(crate) fn peek_byte(&mut self) -> Result<u8, YsonError> {
         if !self.is_binary {
             self.skip_ignored();
         }
@@ -31,7 +27,7 @@ impl<'a> YsonIterator<'a> {
         Ok(self.input[self.pos])
     }
 
-    pub fn next_token(&mut self) -> Result<Token<'a>, YsonError> {
+    pub(crate) fn next_token(&mut self) -> Result<Token<'a>, YsonError> {
         if !self.is_binary {
             self.skip_ignored();
         }
@@ -158,7 +154,7 @@ impl<'a> YsonIterator<'a> {
 
             b'0'..=b'9' | b'-' | b'+' => self.parse_text_number(),
 
-            b'%' => self.parse_text_boolean(),
+            b'%' => self.parse_text_special_value(),
 
             _ if byte.is_ascii_alphabetic() || byte == b'_' => self.parse_text_unquoted_string(),
 
@@ -232,17 +228,20 @@ impl<'a> YsonIterator<'a> {
             if b == b'"' {
                 self.pos += 1;
                 return Ok(Token::String(Cow::Owned(buf)));
-            } else if b == b'\\' {
+            }
+
+            if b == b'\\' {
                 self.pos += 1;
                 if self.pos >= self.input.len() {
                     return Err(YsonError::UnexpectedEof(self.pos));
                 }
+
                 match self.input[self.pos] {
-                    b'"' => buf.push(b'"'),
-                    b'\\' => buf.push(b'\\'),
                     b'n' => buf.push(b'\n'),
                     b'r' => buf.push(b'\r'),
                     b't' => buf.push(b'\t'),
+                    b'\\' => buf.push(b'\\'),
+                    b'"' => buf.push(b'"'),
                     b'x' => {
                         if self.pos + 2 >= self.input.len() {
                             return Err(YsonError::UnexpectedEof(self.pos));
@@ -253,6 +252,26 @@ impl<'a> YsonIterator<'a> {
                             .map_err(|_| YsonError::Custom("Invalid hex escape".into()))?;
                         buf.push(byte);
                         self.pos += 2;
+                    }
+                    b'0'..=b'7' => {
+                        let mut val = self.input[self.pos] - b'0';
+                        if self.pos + 1 < self.input.len()
+                            && (b'0'..=b'7').contains(&self.input[self.pos + 1])
+                        {
+                            val = val * 8 + (self.input[self.pos + 1] - b'0');
+                            self.pos += 1;
+                            if self.pos + 1 < self.input.len()
+                                && (b'0'..=b'7').contains(&self.input[self.pos + 1])
+                            {
+                                let next_val =
+                                    val as u16 * 8 + (self.input[self.pos + 1] - b'0') as u16;
+                                if next_val <= 255 {
+                                    val = next_val as u8;
+                                    self.pos += 1;
+                                }
+                            }
+                        }
+                        buf.push(val);
                     }
                     c => buf.push(c),
                 }
@@ -330,7 +349,7 @@ impl<'a> YsonIterator<'a> {
         Ok(Token::String(Cow::Borrowed(slice)))
     }
 
-    fn parse_text_boolean(&mut self) -> Result<Token<'a>, YsonError> {
+    fn parse_text_special_value(&mut self) -> Result<Token<'a>, YsonError> {
         self.pos += 1;
         let remaining = &self.input[self.pos..];
 
@@ -340,9 +359,19 @@ impl<'a> YsonIterator<'a> {
         } else if remaining.starts_with(b"false") {
             self.pos += 5;
             Ok(Token::Boolean(false))
+        } else if remaining.starts_with(b"nan") {
+            self.pos += 3;
+            Ok(Token::Double(f64::NAN))
+        } else if remaining.starts_with(b"inf") {
+            self.pos += 3;
+            Ok(Token::Double(f64::INFINITY))
+        } else if remaining.starts_with(b"-inf") {
+            self.pos += 4;
+            Ok(Token::Double(f64::NEG_INFINITY))
         } else {
             Err(YsonError::Custom(
-                "Invalid boolean: expected 'true' or 'false' after '%'".into(),
+                "Invalid special value: expected 'true', 'false', 'nan', 'inf' or '-inf' after '%'"
+                    .into(),
             ))
         }
     }

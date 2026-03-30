@@ -7,14 +7,6 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-pub fn from_slice<'a, T>(bytes: &'a [u8], is_binary: bool) -> Result<T, YsonError>
-where
-    T: Deserialize<'a>,
-{
-    let mut de = Deserializer::from_bytes(bytes, is_binary);
-    T::deserialize(&mut de)
-}
-
 pub struct Deserializer<'de> {
     pub(crate) lexer: YsonIterator<'de>,
     pub(crate) is_reading_attributes: bool,
@@ -30,10 +22,6 @@ impl<'de> Deserializer<'de> {
             depth: 0,
             max_depth: 128,
         }
-    }
-
-    pub fn parse_t<T: de::Deserialize<'de>>(&mut self) -> Result<T, YsonError> {
-        T::deserialize(self)
     }
 
     pub(crate) fn enter_recursion(&mut self) -> Result<(), YsonError> {
@@ -236,6 +224,19 @@ where
     }
 }
 
+macro_rules! impl_visit_primitives {
+    ( $( $method:ident ( $v_type:ty ) => $node_variant:ident ),* ) => {
+        $(
+            fn $method<E>(self, v: $v_type) -> Result<Self::Value, E> {
+                Ok(YsonValue {
+                    attributes: None,
+                    node: YsonNode::$node_variant(v),
+                })
+            }
+        )*
+    };
+}
+
 impl<'de> Deserialize<'de> for YsonValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -250,32 +251,11 @@ impl<'de> Deserialize<'de> for YsonValue {
                 formatter.write_str("any YSON value")
             }
 
-            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
-                Ok(YsonValue {
-                    attributes: None,
-                    node: YsonNode::Boolean(v),
-                })
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
-                Ok(YsonValue {
-                    attributes: None,
-                    node: YsonNode::Int64(v),
-                })
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(YsonValue {
-                    attributes: None,
-                    node: YsonNode::Uint64(v),
-                })
-            }
-
-            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
-                Ok(YsonValue {
-                    attributes: None,
-                    node: YsonNode::Double(v),
-                })
+            impl_visit_primitives! {
+                visit_bool(bool) => Boolean,
+                visit_i64(i64) => Int64,
+                visit_u64(u64) => Uint64,
+                visit_f64(f64) => Double
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
