@@ -1,6 +1,6 @@
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
-use yson::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
+use yson_rs::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 struct User {

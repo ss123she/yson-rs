@@ -25,6 +25,20 @@ fn is_binary(format: YsonFormat) -> bool {
 }
 
 /// Deserializes an instance of type `T` from a byte slice in the specified YSON format.
+///
+/// # Examples
+///
+/// ```
+/// use yson_rs::{from_slice, YsonFormat};
+/// use std::collections::HashMap;
+///
+/// // Note: we use quotes around "42" to ensure it's parsed as a String
+/// let data = b"{key=\"42\"; status=\"active\"}";
+/// let map: HashMap<String, String> = from_slice(data, YsonFormat::Text).unwrap();
+///
+/// assert_eq!(map.get("key").unwrap(), "42");
+/// assert_eq!(map.get("status").unwrap(), "active");
+/// ```
 pub fn from_slice<'a, T>(bytes: &'a [u8], format: YsonFormat) -> Result<T, YsonError>
 where
     T: Deserialize<'a>,
@@ -34,6 +48,17 @@ where
 }
 
 /// Serializes the given value into a byte vector using the specified YSON format.
+///
+/// # Examples
+///
+/// ```
+/// use yson_rs::{to_vec, YsonFormat};
+///
+/// let data = vec![1, 2, 3];
+/// let bytes = to_vec(&data, YsonFormat::Binary).unwrap();
+/// assert!(!bytes.is_empty());
+/// assert_eq!(bytes[0], b'[');
+/// ```
 pub fn to_vec<T: Serialize>(value: &T, format: YsonFormat) -> Result<Vec<u8>, YsonError> {
     let mut ser = Serializer::new(is_binary(format));
     value.serialize(&mut ser)?;
@@ -42,8 +67,19 @@ pub fn to_vec<T: Serialize>(value: &T, format: YsonFormat) -> Result<Vec<u8>, Ys
 
 /// Serializes the given value into a YSON string.
 ///
+/// # Examples
+///
+/// ```
+/// use yson_rs::{to_string, YsonFormat};
+///
+/// let val = ("answer", 42);
+/// let res = to_string(&val, YsonFormat::Text).unwrap();
+/// assert_eq!(res, "[answer;42]");
+/// ```
+///
 /// # Errors
-/// Returns an error if the format is `Binary` or if the output contains invalid UTF-8 sequences.
+///
+/// Returns an error if the format is [`YsonFormat::Binary`] or if the output contains invalid UTF-8 sequences.
 pub fn to_string<T: Serialize>(value: &T, format: YsonFormat) -> Result<String, YsonError> {
     if matches!(format, YsonFormat::Binary) {
         return Err(YsonError::Custom(

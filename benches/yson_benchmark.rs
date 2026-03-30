@@ -1,7 +1,7 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use std::hint::black_box;
-use yson::{de::Deserializer, ser::Serializer};
+use yson_rs::{de::Deserializer, ser::Serializer};
 
 use std::collections::HashMap;
 
