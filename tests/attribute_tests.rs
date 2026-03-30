@@ -1,4 +1,3 @@
-use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use yson::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
 

@@ -17,11 +17,7 @@ impl Serializer {
     }
 
     fn write_entity(&mut self) {
-        if self.is_binary {
-            self.output.push(0x23);
-        } else {
-            self.output.push(b'#');
-        }
+        self.output.push(0x23);
     }
 
     fn write_bool(&mut self, v: bool) {
@@ -300,7 +296,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_struct(
         self,
         name: &'static str,
-        fields: usize,
+        _fields: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
         if name == "$__yson_attributes" {
             return Ok(Compound {
@@ -309,8 +305,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
                 mode: CompoundMode::AttrWrapper,
             });
         }
-
-        if fields > 0 && name != "$__yson_attributes" {}
 
         if self.is_writing_attributes {
             self.output.push(b'<');
@@ -365,6 +359,16 @@ pub struct Compound<'a> {
     ser: &'a mut Serializer,
     first: bool,
     mode: CompoundMode,
+}
+
+impl<'a> Compound<'a> {
+    #[inline]
+    fn check_first(&mut self) {
+        if !self.first {
+            self.ser.output.push(b';');
+        }
+        self.first = false;
+    }
 }
 
 impl<'a> ser::SerializeSeq for Compound<'a> {
@@ -470,7 +474,7 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
                 attr_open,
                 body_open,
             } => {
-                if key.starts_with('@') {
+                if let Some(attr_name) = key.strip_prefix('@') {
                     if !*attr_open {
                         self.ser.output.push(b'<');
                         *attr_open = true;
@@ -479,7 +483,7 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
                     if !self.first {
                         self.ser.output.push(b';');
                     }
-                    self.ser.write_string(&key[1..]);
+                    self.ser.write_string(attr_name);
                     self.ser.output.push(b'=');
                     value.serialize(&mut *self.ser)?;
                     self.first = false;

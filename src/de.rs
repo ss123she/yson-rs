@@ -1,15 +1,23 @@
-use crate::access::EnumAccess;
+use crate::access::{AttributesWrapperAccess, CommaSeparated, EmptyMapAccess, EnumAccess};
 use crate::lexer::YsonIterator;
 use crate::node::{Token, YsonNode, YsonValue};
 use crate::{access::FlatStructAccess, error::YsonError};
 use serde::Deserialize;
-use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+pub fn from_slice<'a, T>(bytes: &'a [u8], is_binary: bool) -> Result<T, YsonError>
+where
+    T: Deserialize<'a>,
+{
+    let mut de = Deserializer::from_bytes(bytes, is_binary);
+    T::deserialize(&mut de)
+}
+
 pub struct Deserializer<'de> {
-    pub lexer: YsonIterator<'de>,
-    pub is_reading_attributes: bool,
+    pub(crate) lexer: YsonIterator<'de>,
+    pub(crate) is_reading_attributes: bool,
     depth: usize,
     max_depth: usize,
 }
@@ -182,147 +190,6 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         bytes byte_buf unit unit_struct newtype_struct seq tuple
         tuple_struct map identifier ignored_any
-    }
-}
-
-struct EmptyMapAccess;
-impl<'de> MapAccess<'de> for EmptyMapAccess {
-    type Error = YsonError;
-    fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
-    where
-        K: DeserializeSeed<'de>,
-    {
-        Ok(None)
-    }
-    fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
-    where
-        V: DeserializeSeed<'de>,
-    {
-        unreachable!()
-    }
-}
-
-struct AttributesWrapperAccess<'a, 'de: 'a> {
-    de: &'a mut Deserializer<'de>,
-    state: u8,
-}
-
-impl<'a, 'de> AttributesWrapperAccess<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>) -> Result<Self, YsonError> {
-        de.enter_recursion()?;
-        Ok(AttributesWrapperAccess { de, state: 0 })
-    }
-}
-
-impl<'a, 'de> Drop for AttributesWrapperAccess<'a, 'de> {
-    fn drop(&mut self) {
-        self.de.leave_recursion();
-    }
-}
-
-impl<'de, 'a> SeqAccess<'de> for AttributesWrapperAccess<'a, 'de> {
-    type Error = YsonError;
-    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        match self.state {
-            0 => {
-                self.state = 1;
-                self.de.is_reading_attributes = true;
-                let val = seed.deserialize(&mut *self.de)?;
-                self.de.is_reading_attributes = false;
-                Ok(Some(val))
-            }
-            1 => {
-                self.state = 2;
-                let val = seed.deserialize(&mut *self.de)?;
-                Ok(Some(val))
-            }
-            _ => Ok(None),
-        }
-    }
-}
-
-struct CommaSeparated<'a, 'de: 'a> {
-    de: &'a mut Deserializer<'de>,
-    end_byte: u8,
-}
-
-impl<'a, 'de> CommaSeparated<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>, end_byte: u8) -> Result<Self, YsonError> {
-        de.enter_recursion()?;
-        Ok(CommaSeparated { de, end_byte })
-    }
-}
-
-impl<'a, 'de> Drop for CommaSeparated<'a, 'de> {
-    fn drop(&mut self) {
-        self.de.leave_recursion();
-    }
-}
-
-impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
-    type Error = YsonError;
-
-    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
-    where
-        K: DeserializeSeed<'de>,
-    {
-        let peeked = self.de.lexer.peek_byte()?;
-        if peeked == self.end_byte {
-            self.de.lexer.next_token()?;
-            return Ok(None);
-        }
-
-        if peeked == b';' {
-            self.de.lexer.next_token()?;
-
-            if self.de.lexer.peek_byte()? == self.end_byte {
-                self.de.lexer.next_token()?;
-                return Ok(None);
-            }
-        }
-
-        seed.deserialize(&mut *self.de).map(Some)
-    }
-
-    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
-    where
-        V: DeserializeSeed<'de>,
-    {
-        let token = self.de.lexer.next_token()?;
-        if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom(format!("Expected '=', got {:?}", token)));
-        }
-
-        seed.deserialize(&mut *self.de)
-    }
-}
-
-impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
-    type Error = YsonError;
-
-    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        let peeked = self.de.lexer.peek_byte()?;
-        if peeked == self.end_byte {
-            self.de.lexer.next_token()?;
-            return Ok(None);
-        }
-
-        if peeked == b';' {
-            self.de.lexer.next_token()?;
-
-            if self.de.lexer.peek_byte()? == self.end_byte {
-                self.de.lexer.next_token()?;
-                return Ok(None);
-            }
-        }
-
-        seed.deserialize(&mut *self.de).map(Some)
     }
 }
 
