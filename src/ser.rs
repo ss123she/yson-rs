@@ -1,18 +1,41 @@
 use crate::error::YsonError;
 use serde::{Serialize, ser};
 
+/// Supported format for YSON data representation
 pub enum YsonFormat {
+    /// Binary format
     Binary,
+    /// Text format (human readable)
     Text,
 }
 
+/// A structure for serializing Rust types into YSON byte sequences.
 pub struct Serializer {
+    /// The buffer where the serialized YSON bytes are stored.
     pub output: Vec<u8>,
-    pub is_binary: bool,
-    pub is_writing_attributes: bool,
+    pub(crate) is_binary: bool,
+    pub(crate) is_writing_attributes: bool,
 }
 
 impl Serializer {
+    /// Creates a new `Serializer` instance with a pre-allocated buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `is_binary` - Set to `true` for binary output, or `false` for text output.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yson_rs::ser::Serializer;
+    /// use serde::Serialize;
+    ///
+    /// let mut ser = Serializer::new(false);
+    /// 42i64.serialize(&mut ser).unwrap();
+    ///
+    /// assert_eq!(ser.output, b"42");
+    /// ```
+    #[must_use]
     pub fn new(is_binary: bool) -> Self {
         Self {
             output: Vec::with_capacity(8192),
@@ -327,13 +350,14 @@ enum CompoundMode {
     Struct { attr_open: bool, body_open: bool },
 }
 
+/// A helper for serializing compound YSON types such as lists, maps, and structs.
 pub struct Compound<'a> {
     ser: &'a mut Serializer,
     first: bool,
     mode: CompoundMode,
 }
 
-impl<'a> Compound<'a> {
+impl Compound<'_> {
     #[inline]
     fn check_first(&mut self) {
         if !self.first {
@@ -356,7 +380,7 @@ macro_rules! delegate_seq {
 }
 delegate_seq!(SerializeSeq, SerializeTuple);
 
-impl<'a> ser::SerializeTupleStruct for Compound<'a> {
+impl ser::SerializeTupleStruct for Compound<'_> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
@@ -369,7 +393,7 @@ impl<'a> ser::SerializeTupleStruct for Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeTupleVariant for Compound<'a> {
+impl ser::SerializeTupleVariant for Compound<'_> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
@@ -382,7 +406,7 @@ impl<'a> ser::SerializeTupleVariant for Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeMap for Compound<'a> {
+impl ser::SerializeMap for Compound<'_> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
@@ -405,7 +429,7 @@ impl<'a> ser::SerializeMap for Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeStruct for Compound<'a> {
+impl ser::SerializeStruct for Compound<'_> {
     type Ok = ();
     type Error = YsonError;
 
@@ -491,7 +515,7 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
     }
 }
 
-impl<'a> ser::SerializeStructVariant for Compound<'a> {
+impl ser::SerializeStructVariant for Compound<'_> {
     type Ok = ();
     type Error = YsonError;
     fn serialize_field<T: ?Sized + Serialize>(

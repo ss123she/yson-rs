@@ -7,6 +7,7 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+/// A structure for deserializing YSON data into Rust types.
 pub struct Deserializer<'de> {
     pub(crate) lexer: YsonIterator<'de>,
     pub(crate) is_reading_attributes: bool,
@@ -15,6 +16,27 @@ pub struct Deserializer<'de> {
 }
 
 impl<'de> Deserializer<'de> {
+    /// Creates a new YSON deserializer from the given byte slice.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The raw byte slice containing YSON data.
+    /// * `is_binary` - Set to `true` if the input is in YSON binary format,
+    ///   or `false` if it is in YSON text format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yson_rs::de::Deserializer;
+    /// use serde::Deserialize;
+    ///
+    /// let input = b"42";
+    /// let mut de = Deserializer::from_bytes(input, false);
+    /// let value = i64::deserialize(&mut de).unwrap();
+    ///
+    /// assert_eq!(value, 42);
+    /// ```
+    #[must_use]
     pub fn from_bytes(input: &'de [u8], is_binary: bool) -> Self {
         Deserializer {
             lexer: YsonIterator::new(input, is_binary),
@@ -55,6 +77,22 @@ impl<'de> Deserializer<'de> {
         }
         Ok(())
     }
+}
+
+macro_rules! delegate_skip_attributes {
+    ( $($method:ident),* $(,)? ) => {
+        $(
+            fn $method<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+            where
+                V: Visitor<'de>,
+            {
+                if !self.is_reading_attributes {
+                    self.skip_attributes()?;
+                }
+                self.deserialize_any(visitor)
+            }
+        )*
+    };
 }
 
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
@@ -101,7 +139,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Token::BeginList => visitor.visit_seq(CommaSeparated::new(self, b']')?),
             Token::BeginMap => visitor.visit_map(CommaSeparated::new(self, b'}')?),
             Token::BeginAttributes => visitor.visit_map(CommaSeparated::new(self, b'>')?),
-            t => Err(YsonError::Custom(format!("Unexpected token: {:?}", t))),
+            t => Err(YsonError::Custom(format!("Unexpected token: {t:?}"))),
         }
     }
 
@@ -148,6 +186,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             return visitor.visit_map(FlatStructAccess::new(self)?);
         }
 
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
         self.deserialize_any(visitor)
     }
 
@@ -160,7 +201,10 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        self.skip_attributes()?;
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
+
         let peeked = self.lexer.peek_byte()?;
         if peeked == b'{' {
             self.lexer.next_token()?;
@@ -168,7 +212,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
             loop {
                 match self.lexer.peek_byte() {
-                    Ok(b';') | Ok(b'}') => break,
+                    Ok(b';' | b'}') => break,
                     Ok(_) => {
                         self.lexer.next_token()?;
                     }
@@ -183,8 +227,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             match self.lexer.next_token()? {
                 Token::EndMap => Ok(val),
                 t => Err(YsonError::Custom(format!(
-                    "Expected '}}' after variant, got {:?}",
-                    t
+                    "Expected '}}' after variant, got {t:?}"
                 ))),
             }
         } else {
@@ -192,13 +235,90 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         }
     }
 
-    serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf unit unit_struct newtype_struct seq tuple
-        tuple_struct map identifier ignored_any
+    delegate_skip_attributes! {
+        deserialize_bool, deserialize_i8, deserialize_i16, deserialize_i32,
+        deserialize_i64, deserialize_i128, deserialize_u8, deserialize_u16,
+        deserialize_u32, deserialize_u64, deserialize_u128, deserialize_f32,
+        deserialize_f64, deserialize_char, deserialize_str, deserialize_string,
+        deserialize_bytes, deserialize_byte_buf, deserialize_unit,
+        deserialize_seq, deserialize_map, deserialize_identifier,
+        deserialize_ignored_any
+    }
+
+    fn deserialize_unit_struct<V>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
+        self.deserialize_any(visitor)
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
+        self.deserialize_any(visitor)
+    }
+
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
+        self.deserialize_any(visitor)
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        _name: &'static str,
+        _len: usize,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if !self.is_reading_attributes {
+            self.skip_attributes()?;
+        }
+        self.deserialize_any(visitor)
     }
 }
 
+/// A streaming deserializer that reads a sequence of YSON values from an input buffer.
+///
+/// In many YSON use cases, data is provided as a sequence of top-level values
+/// optionally separated by semicolons (e.g., `1; 2; 3;`). `StreamDeserializer`
+/// allows you to lazily iterate through these values without having to wrap
+/// them in a list `[...]`.
+///
+/// # Examples
+///
+/// ```
+/// use yson_rs::de::StreamDeserializer;
+///
+/// let input = b"1; 2; 3";
+/// let mut stream = StreamDeserializer::<i32>::new(input, false);
+///
+/// assert_eq!(stream.next_item().unwrap(), Some(1));
+/// assert_eq!(stream.next_item().unwrap(), Some(2));
+/// assert_eq!(stream.next_item().unwrap(), Some(3));
+/// assert_eq!(stream.next_item().unwrap(), None); // End of stream
+/// ```
 pub struct StreamDeserializer<'de, T> {
     de: Deserializer<'de>,
     first: bool,
@@ -209,6 +329,13 @@ impl<'de, T> StreamDeserializer<'de, T>
 where
     T: de::Deserialize<'de>,
 {
+    /// Creates a new `StreamDeserializer` from the given byte slice.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The raw byte slice containing a sequence of YSON values.
+    /// * `is_binary` - `true` for binary format, `false` for text format.
+    #[must_use]
     pub fn new(input: &'de [u8], is_binary: bool) -> Self {
         Self {
             de: Deserializer::from_bytes(input, is_binary),
@@ -217,6 +344,20 @@ where
         }
     }
 
+    /// Deserializes the next item in the stream.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(T))` if a value was successfully deserialized.
+    /// - `Ok(None)` if the end of the input was reached.
+    /// - `Err(YsonError)` if a parsing error occurred or if the data doesn't match type `T`.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - The YSON syntax is malformed.
+    /// - An item separator (semicolon) is missing where one is expected.
+    /// - The input ends prematurely after a separator.
     pub fn next_item(&mut self) -> Result<Option<T>, YsonError> {
         let peek_res = self.de.lexer.peek_byte();
 
@@ -228,12 +369,10 @@ where
 
         if self.first {
             self.first = false;
-        } else {
-            if next_byte == b';' {
-                self.de.lexer.next_token()?;
-                if matches!(self.de.lexer.peek_byte(), Err(YsonError::Eof)) {
-                    return Ok(None);
-                }
+        } else if next_byte == b';' {
+            self.de.lexer.next_token()?;
+            if matches!(self.de.lexer.peek_byte(), Err(YsonError::Eof)) {
+                return Ok(None);
             }
         }
 

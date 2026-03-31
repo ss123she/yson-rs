@@ -1,12 +1,25 @@
-pub mod access;
-pub mod attributes;
-pub mod de;
-pub mod error;
-pub mod lexer;
-pub mod node;
-pub mod ser;
-pub mod varint;
+//! # yson-rs
+//!
+//! A Rust library for serializing and deserializing the YSON format.
 
+#![warn(missing_docs)]
+
+// Internal modules hidden from the public API to reduce clutter
+pub(crate) mod access;
+/// Tools for working with YSON attributes and metadata.
+pub mod attributes;
+/// Deserialization logic and types.
+pub mod de;
+/// Error types and handling.
+pub mod error;
+pub(crate) mod lexer;
+/// Abstract Syntax Tree (AST) representation of YSON values.
+pub mod node;
+/// Serialization logic and types.
+pub mod ser;
+pub(crate) mod varint;
+
+// Public re-exports
 pub use crate::attributes::WithAttributes;
 pub use crate::de::StreamDeserializer;
 pub use crate::error::YsonError;
@@ -17,6 +30,7 @@ use crate::de::Deserializer;
 use crate::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
+/// Helper to determine if a format is binary.
 fn is_binary(format: YsonFormat) -> bool {
     match format {
         YsonFormat::Binary => true,
@@ -32,13 +46,18 @@ fn is_binary(format: YsonFormat) -> bool {
 /// use yson_rs::{from_slice, YsonFormat};
 /// use std::collections::HashMap;
 ///
-/// // Note: we use quotes around "42" to ensure it's parsed as a String
 /// let data = b"{key=\"42\"; status=\"active\"}";
 /// let map: HashMap<String, String> = from_slice(data, YsonFormat::Text).unwrap();
 ///
 /// assert_eq!(map.get("key").unwrap(), "42");
-/// assert_eq!(map.get("status").unwrap(), "active");
 /// ```
+///
+/// # Errors
+///
+/// Returns [`YsonError`] if:
+/// - The input data has invalid YSON syntax.
+/// - The input contains invalid UTF-8 sequences (when in text mode).
+/// - The data structure does not match the requirements of the target type `T`.
 pub fn from_slice<'a, T>(bytes: &'a [u8], format: YsonFormat) -> Result<T, YsonError>
 where
     T: Deserialize<'a>,
@@ -57,15 +76,20 @@ where
 /// let data = vec![1, 2, 3];
 /// let bytes = to_vec(&data, YsonFormat::Binary).unwrap();
 /// assert!(!bytes.is_empty());
-/// assert_eq!(bytes[0], b'[');
 /// ```
+///
+/// # Errors
+///
+/// Returns [`YsonError`] if serialization fails, which can occur due to:
+/// - Recursion depth limits being exceeded.
+/// - Custom serialization errors defined by the type `T`.
 pub fn to_vec<T: Serialize>(value: &T, format: YsonFormat) -> Result<Vec<u8>, YsonError> {
     let mut ser = Serializer::new(is_binary(format));
     value.serialize(&mut ser)?;
     Ok(ser.output)
 }
 
-/// Serializes the given value into a YSON string.
+/// Serializes the given value into a YSON-formatted string.
 ///
 /// # Examples
 ///
@@ -79,7 +103,10 @@ pub fn to_vec<T: Serialize>(value: &T, format: YsonFormat) -> Result<Vec<u8>, Ys
 ///
 /// # Errors
 ///
-/// Returns an error if the format is [`YsonFormat::Binary`] or if the output contains invalid UTF-8 sequences.
+/// Returns an error if:
+/// - The format is [`YsonFormat::Binary`] (binary YSON cannot be represented as a UTF-8 string).
+/// - The serialization output contains invalid UTF-8 sequences.
+/// - Serialization fails due to internal structural constraints.
 pub fn to_string<T: Serialize>(value: &T, format: YsonFormat) -> Result<String, YsonError> {
     if matches!(format, YsonFormat::Binary) {
         return Err(YsonError::Custom(

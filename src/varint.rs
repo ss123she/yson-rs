@@ -1,6 +1,6 @@
 use crate::error::YsonError;
 
-#[inline(always)]
+#[inline]
 pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
     let mut result: u64 = 0;
     let mut shift = 0;
@@ -10,7 +10,7 @@ pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
             return Err(YsonError::Custom("Varint too long (overflow u64)".into()));
         }
 
-        let bits = (byte & 0x7F) as u64;
+        let bits = u64::from(byte & 0x7F);
         result |= bits << shift;
         if (byte & 0x80) == 0 {
             return Ok((result, i + 1));
@@ -23,14 +23,14 @@ pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
     ))
 }
 
-#[inline(always)]
+#[inline]
 pub fn read_varint(input: &[u8]) -> Result<(i64, usize), YsonError> {
     let (u_val, consumed) = read_uvarint(input)?;
     let val = ((u_val >> 1) as i64) ^ (-((u_val & 1) as i64));
     Ok((val, consumed))
 }
 
-#[inline(always)]
+#[inline]
 pub fn write_uvarint(mut val: u64, buf: &mut Vec<u8>) {
     while val >= 0x80 {
         buf.push((val as u8) | 0x80);
@@ -39,8 +39,30 @@ pub fn write_uvarint(mut val: u64, buf: &mut Vec<u8>) {
     buf.push(val as u8);
 }
 
-#[inline(always)]
+#[inline]
 pub fn write_varint(val: i64, buf: &mut Vec<u8>) {
     let zigzag = ((val << 1) ^ (val >> 63)) as u64;
     write_uvarint(zigzag, buf);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_varint_overflow_exact() {
+        let mut input = vec![0x80; 11];
+        input.push(0x01);
+        let res = read_uvarint(&input);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_roundtrip_varint() {
+        let mut buf = Vec::new();
+        write_varint(-12345, &mut buf);
+        let (val, consumed) = read_varint(&buf).unwrap();
+        assert_eq!(val, -12345);
+        assert_eq!(consumed, buf.len());
+    }
 }

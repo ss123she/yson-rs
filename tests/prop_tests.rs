@@ -2,33 +2,9 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use yson_rs::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct User {
-    name: String,
-    age: u32,
-}
+use crate::common::*;
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct Meta {
-    active: bool,
-    role: String,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-enum UserStatus {
-    Pending,
-    Active,
-    Banned(String),
-    Custom { code: u32, reason: String },
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct ComplexEntity {
-    id: u64,
-    user: WithAttributes<User, Meta>,
-    tags: Vec<String>,
-    status: Option<UserStatus>,
-}
+mod common;
 
 fn roundtrip<T>(value: &T, is_binary: bool) -> T
 where

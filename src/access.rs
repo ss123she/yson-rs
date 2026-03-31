@@ -49,13 +49,13 @@ impl<'a, 'de> FlatStructAccess<'a, 'de> {
     }
 }
 
-impl<'a, 'de> Drop for FlatStructAccess<'a, 'de> {
+impl Drop for FlatStructAccess<'_, '_> {
     fn drop(&mut self) {
         self.de.leave_recursion();
     }
 }
 
-impl<'de, 'a> MapAccess<'de> for FlatStructAccess<'a, 'de> {
+impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
     type Error = YsonError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -82,16 +82,15 @@ impl<'de, 'a> MapAccess<'de> for FlatStructAccess<'a, 'de> {
                             Cow::Borrowed(b) => std::str::from_utf8(b).unwrap_or(""),
                             Cow::Owned(vec) => std::str::from_utf8(vec).unwrap_or(""),
                         };
-                        let prefixed = format!("@{}", key_str);
+                        let prefixed = format!("@{key_str}");
                         let deserializer: StringDeserializer<YsonError> =
                             prefixed.into_deserializer();
                         self.is_value_only = false;
                         return seed.deserialize(deserializer).map(Some);
-                    } else {
-                        return Err(YsonError::Custom(
-                            "Expected string key in attributes".into(),
-                        ));
                     }
+                    return Err(YsonError::Custom(
+                        "Expected string key in attributes".into(),
+                    ));
                 }
                 FlatState::Between => {
                     let peeked = self.de.lexer.peek_byte()?;
@@ -103,10 +102,9 @@ impl<'de, 'a> MapAccess<'de> for FlatStructAccess<'a, 'de> {
                         self.de.lexer.next_token()?;
                         self.state = FlatState::Done;
                         return Ok(None);
-                    } else {
-                        self.state = FlatState::ValueOnly;
-                        continue;
                     }
+                    self.state = FlatState::ValueOnly;
+                    continue;
                 }
                 FlatState::Body => {
                     let peeked = self.de.lexer.peek_byte()?;
@@ -145,7 +143,7 @@ impl<'de, 'a> MapAccess<'de> for FlatStructAccess<'a, 'de> {
 
         let token = self.de.lexer.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom(format!("Expected '=', got {:?}", token)));
+            return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
         }
         seed.deserialize(&mut *self.de)
     }
@@ -162,7 +160,7 @@ impl<'a, 'de> EnumAccess<'a, 'de> {
     }
 }
 
-impl<'de, 'a> de::EnumAccess<'de> for EnumAccess<'a, 'de> {
+impl<'de> de::EnumAccess<'de> for EnumAccess<'_, 'de> {
     type Error = YsonError;
     type Variant = Self;
 
@@ -175,7 +173,7 @@ impl<'de, 'a> de::EnumAccess<'de> for EnumAccess<'a, 'de> {
     }
 }
 
-impl<'de, 'a> de::VariantAccess<'de> for EnumAccess<'a, 'de> {
+impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     type Error = YsonError;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
@@ -261,13 +259,13 @@ impl<'a, 'de> AttributesWrapperAccess<'a, 'de> {
     }
 }
 
-impl<'a, 'de> Drop for AttributesWrapperAccess<'a, 'de> {
+impl Drop for AttributesWrapperAccess<'_, '_> {
     fn drop(&mut self) {
         self.de.leave_recursion();
     }
 }
 
-impl<'de, 'a> SeqAccess<'de> for AttributesWrapperAccess<'a, 'de> {
+impl<'de> SeqAccess<'de> for AttributesWrapperAccess<'_, 'de> {
     type Error = YsonError;
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
     where
@@ -303,13 +301,13 @@ impl<'a, 'de> CommaSeparated<'a, 'de> {
     }
 }
 
-impl<'a, 'de> Drop for CommaSeparated<'a, 'de> {
+impl Drop for CommaSeparated<'_, '_> {
     fn drop(&mut self) {
         self.de.leave_recursion();
     }
 }
 
-impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
+impl<'de> MapAccess<'de> for CommaSeparated<'_, 'de> {
     type Error = YsonError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -340,14 +338,14 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
     {
         let token = self.de.lexer.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom(format!("Expected '=', got {:?}", token)));
+            return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
         }
 
         seed.deserialize(&mut *self.de)
     }
 }
 
-impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
+impl<'de> SeqAccess<'de> for CommaSeparated<'_, 'de> {
     type Error = YsonError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>

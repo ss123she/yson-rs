@@ -1,4 +1,4 @@
-A fast and compliant [YSON](https://ytsaurus.tech/docs/en/user-guide/storage/yson) (YTsaurus Object Notation) serializer and deserializer for Rust, built on top of serde.
+A fast and compliant [YSON](https://ytsaurus.tech/docs/en/user-guide/storage/yson) serializer and deserializer for Rust, built on top of serde.
 
 ## Features
 YSON Support: Handles Text, Binary formats.

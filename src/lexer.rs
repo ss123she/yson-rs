@@ -264,7 +264,7 @@ impl<'a> YsonIterator<'a> {
                                 && (b'0'..=b'7').contains(&self.input[self.pos + 1])
                             {
                                 let next_val =
-                                    val as u16 * 8 + (self.input[self.pos + 1] - b'0') as u16;
+                                    u16::from(val) * 8 + u16::from(self.input[self.pos + 1] - b'0');
                                 if next_val <= 255 {
                                     val = next_val as u8;
                                     self.pos += 1;
@@ -315,17 +315,17 @@ impl<'a> YsonIterator<'a> {
             let val = s
                 .trim_end_matches('u')
                 .parse::<u64>()
-                .map_err(|_| YsonError::Custom(format!("Invalid uint64: {}", s)))?;
+                .map_err(|_| YsonError::Custom(format!("Invalid uint64: {s}")))?;
             Ok(Token::Uint64(val))
         } else if has_dot_or_exp {
             let val = s
                 .parse::<f64>()
-                .map_err(|_| YsonError::Custom(format!("Invalid double: {}", s)))?;
+                .map_err(|_| YsonError::Custom(format!("Invalid double: {s}")))?;
             Ok(Token::Double(val))
         } else {
             let val = s
                 .parse::<i64>()
-                .map_err(|_| YsonError::Custom(format!("Invalid int64: {}", s)))?;
+                .map_err(|_| YsonError::Custom(format!("Invalid int64: {s}")))?;
             Ok(Token::Int64(val))
         }
     }

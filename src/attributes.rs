@@ -7,9 +7,36 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Wrapper that pairs a value of type `T` with its associated YSON attributes of type `A`
+///
+/// Any value can have optional map of attributes
+///
+/// # Examples
+///
+/// ```
+/// use yson_rs::{WithAttributes, from_slice, YsonFormat};
+/// use std::collections::BTreeMap;
+///
+/// // YSON: <author="Alice">"Hello"
+/// let input = b"<author=\"Alice\">\"Hello\"";
+///
+/// // Define a value where attributes are a BTreeMap and the content is a String
+/// type MyNode = WithAttributes<String, BTreeMap<String, String>>;
+///
+/// let node: MyNode = from_slice(input, YsonFormat::Text).unwrap();
+///
+/// // Access attributes
+/// assert_eq!(node.attributes.get("author").unwrap(), "Alice");
+///
+/// // Access inner value directly via Deref or .value
+/// assert_eq!(node.value, "Hello");
+/// assert_eq!(*node, "Hello");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WithAttributes<T, A> {
+    /// The attributes associated with the value.
     pub attributes: A,
+    /// Data content of the YSON node.
     pub value: T,
 }
 

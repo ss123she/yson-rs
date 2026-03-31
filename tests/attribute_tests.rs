@@ -1,33 +1,6 @@
 use serde::{Deserialize, Serialize};
 use yson_rs::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct User {
-    name: String,
-    age: u32,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct Meta {
-    active: bool,
-    role: String,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-enum UserStatus {
-    Pending,
-    Active,
-    Banned(String),
-    Custom { code: u32, reason: String },
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-struct ComplexEntity {
-    id: u64,
-    user: WithAttributes<User, Meta>,
-    tags: Vec<String>,
-    status: Option<UserStatus>,
-}
+mod common;
 
 fn roundtrip<T>(value: &T, is_binary: bool) -> T
 where
@@ -44,6 +17,10 @@ where
 
 #[cfg(test)]
 mod unit_tests {
+    use yson_rs::{YsonFormat, from_slice};
+
+    use crate::common::*;
+
     use super::*;
 
     #[test]
@@ -66,7 +43,7 @@ mod unit_tests {
         assert!(result.starts_with('<'));
         assert!(result.contains("active=%true"));
         assert!(result.contains("role=admin"));
-        assert!(result.contains(">"));
+        assert!(result.contains('>'));
         assert!(result.contains("name=Alice"));
         assert!(result.contains("age=30u"));
     }
@@ -133,5 +110,38 @@ mod unit_tests {
 
         assert_eq!(nested, roundtrip(&nested, false));
         assert_eq!(nested, roundtrip(&nested, true));
+    }
+
+    #[test]
+    fn test_attribute_skipping() {
+        let yson = b"<system_attr=123>42";
+
+        let val: i64 = from_slice(yson, YsonFormat::Text)
+            .expect("Parser should skip attributes for primitives");
+        assert_eq!(val, 42);
+    }
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[serde(untagged)]
+    enum Untagged {
+        Number(i64),
+        Text(String),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[serde(tag = "type", content = "payload")]
+    enum AdjacentlyTagged {
+        Message { text: String },
+    }
+
+    #[test]
+    fn test_advanced_enums() {
+        let num = Untagged::Number(42);
+        assert_eq!(num, roundtrip(&num, false));
+
+        let msg = AdjacentlyTagged::Message {
+            text: "Hello".into(),
+        };
+        assert_eq!(msg, roundtrip(&msg, false));
     }
 }

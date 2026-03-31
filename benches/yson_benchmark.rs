@@ -30,7 +30,7 @@ fn generate_data() -> Vec<BenchData<'static>> {
 
             BenchData {
                 id: i,
-                name: leak_str(format!("Item-{}", i)),
+                name: leak_str(format!("Item-{i}")),
                 tags: vec!["fast", "rust", "serde"],
                 properties: props,
             }
@@ -57,7 +57,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let mut ser = Serializer::new(true);
             black_box(&data).serialize(&mut ser).unwrap();
-        })
+        });
     });
 
     // Bench: Deserialize Binary
@@ -65,7 +65,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let mut de = Deserializer::from_bytes(black_box(&bin_bytes), true);
             let _val: Vec<BenchData> = Vec::deserialize(&mut de).unwrap();
-        })
+        });
     });
 
     // Bench: Serialize Text
@@ -74,7 +74,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let mut ser = Serializer::new(false);
             black_box(&data).serialize(&mut ser).unwrap();
-        })
+        });
     });
 
     // Bench: Deserialize Text
@@ -82,7 +82,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let mut de = Deserializer::from_bytes(black_box(&text_bytes), false);
             let _val: Vec<BenchData> = Vec::deserialize(&mut de).unwrap();
-        })
+        });
     });
 
     group.finish();

@@ -1,5 +1,3 @@
-use proptest::prelude::*;
-
 #[cfg(test)]
 mod coverage_tests {
     use std::collections::BTreeMap;
@@ -9,8 +7,6 @@ mod coverage_tests {
         StreamDeserializer, WithAttributes, YsonError, YsonFormat, YsonNode, YsonValue, from_slice,
         to_string, to_vec,
     };
-
-    use super::*;
 
     #[test]
     fn test_malformed_varint() {
@@ -197,14 +193,6 @@ mod coverage_tests {
         assert_eq!(stream.next_item().unwrap(), Some(2));
         assert_eq!(stream.next_item().unwrap(), Some(3));
         assert_eq!(stream.next_item().unwrap(), None);
-    }
-
-    #[test]
-    fn test_varint_overflow_exact() {
-        let mut input = vec![0x80; 11];
-        input.push(0x01);
-        let res: Result<(u64, usize), _> = yson_rs::varint::read_uvarint(&input);
-        assert!(res.is_err());
     }
 
     #[test]
@@ -479,15 +467,6 @@ mod coverage_tests {
         assert!(res.is_err());
         if let Err(YsonError::Custom(msg)) = res {
             assert_eq!(msg, "String length cannot be negative");
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_fuzz_i64(n in any::<i64>()) {
-            let encoded = to_vec(&n, YsonFormat::Binary).unwrap();
-            let decoded: i64 = from_slice(&encoded, YsonFormat::Binary).unwrap();
-            assert_eq!(n, decoded);
         }
     }
 }
