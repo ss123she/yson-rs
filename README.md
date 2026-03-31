@@ -7,7 +7,7 @@ YSON Support: Handles Text, Binary formats.
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-yson-rs = "0.1.1"
+yson-rs = "0.1.2"
 serde = { version = "1.0", features = ["derive"] }
 ```
 
