@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc f03f80951a5776f624220c2469441f6af672024e64c0f60aa051987524598fc3 # shrinks to v = ComplexEntity { id: 0, user: WithAttributes { attributes: Meta { active: false, role: "" }, value: User { name: "", age: 0 } }, tags: [], status: None }

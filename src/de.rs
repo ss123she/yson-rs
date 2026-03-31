@@ -165,10 +165,28 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         if peeked == b'{' {
             self.lexer.next_token()?;
             let val = visitor.visit_enum(EnumAccess::new(self, true))?;
-            if self.lexer.next_token()? != Token::EndMap {
-                return Err(YsonError::Custom("Expected '}' after variant".into()));
+
+            loop {
+                match self.lexer.peek_byte() {
+                    Ok(b';') | Ok(b'}') => break,
+                    Ok(_) => {
+                        self.lexer.next_token()?;
+                    }
+                    Err(_) => break,
+                }
             }
-            Ok(val)
+
+            if let Ok(b';') = self.lexer.peek_byte() {
+                self.lexer.next_token()?;
+            }
+
+            match self.lexer.next_token()? {
+                Token::EndMap => Ok(val),
+                t => Err(YsonError::Custom(format!(
+                    "Expected '}}' after variant, got {:?}",
+                    t
+                ))),
+            }
         } else {
             visitor.visit_enum(EnumAccess::new(self, false))
         }
