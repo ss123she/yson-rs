@@ -579,9 +579,7 @@ fn decode_escapes(raw: &[u8]) -> Result<Vec<u8>, YsonError> {
         }
 
         match raw[i] {
-            // The whole C set. Leaving `\a \b \f \v` out of it did not fail --
-            // they fell through to the catch-all below and decoded to the
-            // letter, so a backspace silently became a `b`.
+            // C escapes: \\a\\b\\f\\v fall through to letter (backspace becomes `b`).
             b'a' => out.push(0x07),
             b'b' => out.push(0x08),
             b'f' => out.push(0x0C),

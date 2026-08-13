@@ -10,15 +10,10 @@ homepage = "https://github.com/ss123she/yson-rs"
 readme = "README.md"
 keywords = ["yson", "ytsaurus", "serde", "serialization", "encoding"]
 categories = ["encoding", "parsing"]
-# Interop fixtures stay in the package: a crate that ships its tests but not
-# their inputs cannot be verified by the people depending on it.
 exclude = ["data/*", ".github/*"]
 
 [features]
 default = ["serde"]
-# The serde binding: `from_slice`, `to_vec`, `to_string`, `Deserializer`,
-# `Serializer` and `WithAttributes`. Turn it off for the format layer alone —
-# `Reader`, `Writer` and `YsonValue`, which need no serde.
 serde = ["dep:serde"]
 
 [dependencies]
@@ -34,11 +29,6 @@ serde_bytes = "0.11"
 proptest = "1.1"
 allocation-counter = "0.8.1"
 
-# There is deliberately no `[profile.release]` here. Cargo honours profiles only
-# in the root package, so one in a library is inert for everyone who depends on
-# it -- and `panic = "abort"` is the wrong setting for a library in any case: it
-# is not this crate's call to remove unwinding from a downstream binary.
-# `[profile.bench]` stays, because benchmarking happens with this crate as root.
 [profile.bench]
 opt-level = 3
 lto = "fat"

@@ -12,8 +12,7 @@ use crate::core::scan::{Scan, scan_value_with_max_depth};
 /// Default read buffer, and the steady-state memory cost of a [`FrameReader`].
 pub const DEFAULT_BUFFER_BYTES: usize = 64 * 1024;
 
-/// Default ceiling on one record, to bound the damage a corrupt length prefix
-/// can do.
+/// Default ceiling on one record, to bound the damage a corrupt length prefix can do.
 pub const DEFAULT_MAX_RECORD_BYTES: usize = 256 * 1024 * 1024;
 
 /// Skips separators and insignificant bytes between records.
@@ -113,7 +112,6 @@ impl<'a> Iterator for Frames<'a> {
                 self.pos += len;
                 Some(Ok(frame))
             }
-            // The whole input is present, so a short read means truncation.
             Ok(Scan::Incomplete) => {
                 self.failed = true;
                 Some(Err(YsonError::UnexpectedEof(self.pos)))
@@ -159,7 +157,7 @@ pub struct FrameReader<R> {
     filled: usize,
     /// Read cursor into `buf`.
     pos: usize,
-    /// Offset of `buf[0]` within the whole stream.
+    /// Offset of `buf[0]` within stream.
     base_offset: u64,
     format: YsonFormat,
     max_depth: usize,
