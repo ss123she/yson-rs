@@ -1,15 +1,11 @@
-use crate::error::YsonError;
+use crate::core::error::YsonError;
+use crate::core::{Writer, YsonFormat};
 use serde::{Serialize, ser};
 
-/// Supported format for YSON data representation
-pub enum YsonFormat {
-    /// Binary format
-    Binary,
-    /// Text format (human readable)
-    Text,
-}
-
 /// A structure for serializing Rust types into YSON byte sequences.
+///
+/// This is the serde binding over [`Writer`]: it decides *which* YSON shape a
+/// Rust type takes, and hands the bytes themselves to the writer.
 pub struct Serializer {
     /// The buffer where the serialized YSON bytes are stored.
     pub output: Vec<u8>,
@@ -18,118 +14,95 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    /// Creates a new `Serializer` instance with a pre-allocated buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `is_binary` - Set to `true` for binary output, or `false` for text output.
+    /// Creates a `Serializer` writing `format`, with a pre-allocated buffer.
     ///
     /// # Examples
     ///
     /// ```
-    /// use yson_rs::ser::Serializer;
+    /// use yson_rs::{Serializer, YsonFormat};
     /// use serde::Serialize;
     ///
-    /// let mut ser = Serializer::new(false);
+    /// let mut ser = Serializer::new(YsonFormat::Text);
     /// 42i64.serialize(&mut ser).unwrap();
     ///
     /// assert_eq!(ser.output, b"42");
     /// ```
     #[must_use]
-    pub fn new(is_binary: bool) -> Self {
+    pub fn new(format: YsonFormat) -> Self {
+        Self::with_buffer(Vec::with_capacity(8192), format)
+    }
+
+    /// Creates a `Serializer` that appends to an existing buffer.
+    ///
+    /// The buffer's current contents are left alone, so several values can be
+    /// written into one allocation.
+    ///
+    /// ```
+    /// use yson_rs::{Serializer, YsonFormat};
+    /// use serde::Serialize;
+    ///
+    /// let mut buffer = Vec::new();
+    /// for value in [1, 2, 3] {
+    ///     let mut ser = Serializer::with_buffer(buffer, YsonFormat::Text);
+    ///     value.serialize(&mut ser).unwrap();
+    ///     buffer = ser.output;
+    ///     buffer.push(b';');
+    /// }
+    /// assert_eq!(buffer, b"1;2;3;");
+    /// ```
+    #[must_use]
+    pub fn with_buffer(buffer: Vec<u8>, format: YsonFormat) -> Self {
         Self {
-            output: Vec::with_capacity(8192),
-            is_binary,
+            output: buffer,
+            is_binary: format.is_binary(),
             is_writing_attributes: false,
         }
     }
 
+    /// The format this serializer writes.
+    #[must_use]
+    pub fn format(&self) -> YsonFormat {
+        if self.is_binary {
+            YsonFormat::Binary
+        } else {
+            YsonFormat::Text
+        }
+    }
+
+    /// A writer over this serializer's buffer.
+    #[inline]
+    pub(crate) fn writer(&mut self) -> Writer<'_> {
+        let format = if self.is_binary {
+            YsonFormat::Binary
+        } else {
+            YsonFormat::Text
+        };
+        Writer::new(&mut self.output, format)
+    }
+
     #[inline]
     fn write_entity(&mut self) {
-        self.output.push(0x23);
+        self.writer().write_entity();
     }
 
     fn write_bool(&mut self, v: bool) {
-        if self.is_binary {
-            self.output.push(if v { 0x05 } else { 0x04 });
-        } else {
-            self.output
-                .extend_from_slice(if v { b"%true" } else { b"%false" });
-        }
+        self.writer().write_bool(v);
     }
 
     fn write_i64(&mut self, v: i64) {
-        if self.is_binary {
-            self.output.push(0x02);
-            crate::varint::write_varint(v, &mut self.output);
-        } else {
-            self.output
-                .extend_from_slice(itoa::Buffer::new().format(v).as_bytes());
-        }
+        self.writer().write_i64(v);
     }
 
     fn write_u64(&mut self, v: u64) {
-        if self.is_binary {
-            self.output.push(0x06);
-            crate::varint::write_uvarint(v, &mut self.output);
-        } else {
-            self.output
-                .extend_from_slice(itoa::Buffer::new().format(v).as_bytes());
-            self.output.push(b'u');
-        }
+        self.writer().write_u64(v);
     }
 
     fn write_f64(&mut self, v: f64) {
-        if self.is_binary {
-            self.output.push(0x03);
-            self.output.extend_from_slice(&v.to_le_bytes());
-        } else if v.is_nan() {
-            self.output.extend_from_slice(b"%nan");
-        } else if v.is_infinite() {
-            self.output.extend_from_slice(if v.is_sign_negative() {
-                b"%-inf"
-            } else {
-                b"%inf"
-            });
-        } else {
-            let s = ryu::Buffer::new().format(v).to_owned();
-            self.output.extend_from_slice(s.as_bytes());
-            if !s.contains(&['.', 'e', 'E'][..]) {
-                self.output.extend_from_slice(b".0");
-            }
-        }
+        self.writer().write_f64(v);
     }
 
     fn write_string(&mut self, v: &str) {
-        if self.is_binary {
-            self.output.push(0x01);
-            crate::varint::write_varint(v.len() as i64, &mut self.output);
-            self.output.extend_from_slice(v.as_bytes());
-        } else if is_safe_unquoted(v.as_bytes()) {
-            self.output.extend_from_slice(v.as_bytes());
-        } else {
-            self.output.push(b'"');
-            for &b in v.as_bytes() {
-                match b {
-                    b'"' => self.output.extend_from_slice(b"\\\""),
-                    b'\\' => self.output.extend_from_slice(b"\\\\"),
-                    b'\n' => self.output.extend_from_slice(b"\\n"),
-                    b'\r' => self.output.extend_from_slice(b"\\r"),
-                    b'\t' => self.output.extend_from_slice(b"\\t"),
-                    0x00..=0x1F => {
-                        const HEX: &[u8] = b"0123456789abcdef";
-                        self.output.extend_from_slice(&[
-                            b'\\',
-                            b'x',
-                            HEX[(b >> 4) as usize],
-                            HEX[(b & 0x0F) as usize],
-                        ]);
-                    }
-                    _ => self.output.push(b),
-                }
-            }
-            self.output.push(b'"');
-        }
+        self.writer().write_string(v.as_bytes());
     }
 }
 
@@ -179,33 +152,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<(), Self::Error> {
-        if self.is_binary {
-            self.output.push(0x01);
-            crate::varint::write_varint(v.len() as i64, &mut self.output);
-            self.output.extend_from_slice(v);
-        } else {
-            self.output.push(b'"');
-            for &b in v {
-                match b {
-                    b'"' => self.output.extend_from_slice(b"\\\""),
-                    b'\\' => self.output.extend_from_slice(b"\\\\"),
-                    b'\n' => self.output.extend_from_slice(b"\\n"),
-                    b'\r' => self.output.extend_from_slice(b"\\r"),
-                    b'\t' => self.output.extend_from_slice(b"\\t"),
-                    0x20..=0x7E => self.output.push(b),
-                    _ => {
-                        const HEX: &[u8] = b"0123456789abcdef";
-                        self.output.extend_from_slice(&[
-                            b'\\',
-                            b'x',
-                            HEX[(b >> 4) as usize],
-                            HEX[(b & 0x0F) as usize],
-                        ]);
-                    }
-                }
-            }
-            self.output.push(b'"');
-        }
+        self.writer().write_bytes(v);
         Ok(())
     }
 
@@ -237,16 +184,16 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         var: &'static str,
         val: &T,
     ) -> Result<(), Self::Error> {
-        self.output.push(b'{');
+        self.writer().begin_map();
         self.write_string(var);
-        self.output.push(b'=');
+        self.writer().key_value_separator();
         val.serialize(&mut *self)?;
-        self.output.push(b'}');
+        self.writer().end_map();
         Ok(())
     }
 
     fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        self.output.push(b'[');
+        self.writer().begin_list();
         Ok(Compound {
             ser: self,
             first: true,
@@ -272,9 +219,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         var: &'static str,
         _: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        self.output.push(b'{');
+        self.writer().begin_map();
         self.write_string(var);
-        self.output.extend_from_slice(b"=[");
+        let mut w = self.writer();
+        w.key_value_separator();
+        w.begin_list();
         Ok(Compound {
             ser: self,
             first: true,
@@ -283,12 +232,13 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        let (open, mode) = if self.is_writing_attributes {
-            (b'<', CompoundMode::Attr)
+        let mode = if self.is_writing_attributes {
+            self.writer().begin_attributes();
+            CompoundMode::Attr
         } else {
-            (b'{', CompoundMode::Map)
+            self.writer().begin_map();
+            CompoundMode::Map
         };
-        self.output.push(open);
         self.is_writing_attributes = false;
         Ok(Compound {
             ser: self,
@@ -305,14 +255,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         let mode = if name == "$__yson_attributes" {
             CompoundMode::AttrWrapper
         } else if self.is_writing_attributes {
-            self.output.push(b'<');
+            self.writer().begin_attributes();
             self.is_writing_attributes = false;
             CompoundMode::Attr
         } else {
-            CompoundMode::Struct {
-                attr_open: false,
-                body_open: false,
-            }
+            CompoundMode::Struct(StructState::Start)
         };
         Ok(Compound {
             ser: self,
@@ -328,15 +275,35 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         var: &'static str,
         _: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        self.output.push(b'{');
+        self.writer().begin_map();
         self.write_string(var);
-        self.output.extend_from_slice(b"={");
+        let mut w = self.writer();
+        w.key_value_separator();
+        w.begin_map();
         Ok(Compound {
             ser: self,
             first: true,
             mode: CompoundMode::VariantMap,
         })
     }
+}
+
+/// How far a struct has got through the one shape a YSON document allows.
+///
+/// A YSON value is optional `<attributes>`, strictly before what they decorate,
+/// then exactly one body. Struct fields arrive in declaration order, so they
+/// have to arrive in that order too; the transitions this enum permits are the
+/// whole rule.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StructState {
+    /// Nothing written yet.
+    Start,
+    /// Inside `<`…, attributes so far.
+    Attrs,
+    /// Inside `{`…, a map body.
+    Body,
+    /// A `$value` body has been written; the value is complete.
+    Value,
 }
 
 #[derive(Clone, Copy)]
@@ -347,7 +314,7 @@ enum CompoundMode {
     AttrWrapper,
     VariantSeq,
     VariantMap,
-    Struct { attr_open: bool, body_open: bool },
+    Struct(StructState),
 }
 
 /// A helper for serializing compound YSON types such as lists, maps, and structs.
@@ -361,9 +328,85 @@ impl Compound<'_> {
     #[inline]
     fn check_first(&mut self) {
         if !self.first {
-            self.ser.output.push(b';');
+            self.ser.writer().item_separator();
         }
         self.first = false;
+    }
+
+    /// Writes the key of one struct field and returns the state that follows.
+    ///
+    /// The caller writes the value. This decides which brackets the key needs
+    /// in front of it, and which orders are legal at all.
+    fn write_struct_field(
+        &mut self,
+        state: StructState,
+        key: &'static str,
+    ) -> Result<StructState, YsonError> {
+        if let Some(attr_name) = key.strip_prefix('@') {
+            match state {
+                StructState::Start => {
+                    self.ser.writer().begin_attributes();
+                    self.first = true;
+                }
+                StructState::Attrs => {}
+                // Attributes stand strictly before the value they decorate.
+                StructState::Body | StructState::Value => {
+                    return Err(YsonError::Custom(format!(
+                        "the attribute field `{key}` comes after the value body; \
+                         YSON attributes stand before the value they decorate, \
+                         so `@`-renamed fields must be declared first"
+                    )));
+                }
+            }
+            self.check_first();
+            self.ser.write_string(attr_name);
+            self.ser.writer().key_value_separator();
+            return Ok(StructState::Attrs);
+        }
+
+        if key == "$value" {
+            match state {
+                StructState::Start => {}
+                StructState::Attrs => self.ser.writer().end_attributes(),
+                // One value cannot have two bodies.
+                StructState::Body => {
+                    return Err(YsonError::Custom(
+                        "the `$value` field comes after plain fields; a value has \
+                         either a `$value` body or a map body of plain fields, not both"
+                            .into(),
+                    ));
+                }
+                StructState::Value => {
+                    return Err(YsonError::Custom(
+                        "two `$value` fields in one struct".into(),
+                    ));
+                }
+            }
+            return Ok(StructState::Value);
+        }
+
+        match state {
+            StructState::Start => {
+                self.ser.writer().begin_map();
+                self.first = true;
+            }
+            StructState::Attrs => {
+                self.ser.writer().end_attributes();
+                self.ser.writer().begin_map();
+                self.first = true;
+            }
+            StructState::Body => {}
+            StructState::Value => {
+                return Err(YsonError::Custom(format!(
+                    "the plain field `{key}` comes after a `$value` body; a value has \
+                     either a `$value` body or a map body of plain fields, not both"
+                )));
+            }
+        }
+        self.check_first();
+        self.ser.write_string(key);
+        self.ser.writer().key_value_separator();
+        Ok(StructState::Body)
     }
 }
 
@@ -374,7 +417,7 @@ macro_rules! delegate_seq {
             fn serialize_element<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<(), Self::Error> {
                 self.check_first(); v.serialize(&mut *self.ser)
             }
-            fn end(self) -> Result<(), Self::Error> { self.ser.output.push(b']'); Ok(()) }
+            fn end(self) -> Result<(), Self::Error> { self.ser.writer().end_list(); Ok(()) }
         })*
     };
 }
@@ -388,7 +431,7 @@ impl ser::SerializeTupleStruct for Compound<'_> {
         v.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        self.ser.output.push(b']');
+        self.ser.writer().end_list();
         Ok(())
     }
 }
@@ -401,7 +444,9 @@ impl ser::SerializeTupleVariant for Compound<'_> {
         v.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        self.ser.output.extend_from_slice(b"]}");
+        let mut w = self.ser.writer();
+        w.end_list();
+        w.end_map();
         Ok(())
     }
 }
@@ -414,17 +459,16 @@ impl ser::SerializeMap for Compound<'_> {
         key.serialize(&mut *self.ser)
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
-        self.ser.output.push(b'=');
+        self.ser.writer().key_value_separator();
         value.serialize(&mut *self.ser)
     }
     fn end(self) -> Result<(), Self::Error> {
-        self.ser
-            .output
-            .push(if matches!(self.mode, CompoundMode::Attr) {
-                b'>'
-            } else {
-                b'}'
-            });
+        let mut w = self.ser.writer();
+        if matches!(self.mode, CompoundMode::Attr) {
+            w.end_attributes();
+        } else {
+            w.end_map();
+        }
         Ok(())
     }
 }
@@ -447,46 +491,15 @@ impl ser::SerializeStruct for Compound<'_> {
                     value.serialize(&mut *self.ser)?;
                 }
             }
-            CompoundMode::Struct {
-                mut attr_open,
-                mut body_open,
-            } => {
-                if let Some(attr_name) = key.strip_prefix('@') {
-                    if !attr_open {
-                        self.ser.output.push(b'<');
-                        attr_open = true;
-                        self.first = true;
-                    }
-                    self.check_first();
-                    self.ser.write_string(attr_name);
-                    self.ser.output.push(b'=');
-                } else {
-                    if attr_open {
-                        self.ser.output.push(b'>');
-                        attr_open = false;
-                    }
-                    if key != "$value" {
-                        if !body_open {
-                            self.ser.output.push(b'{');
-                            body_open = true;
-                            self.first = true;
-                        }
-                        self.check_first();
-                        self.ser.write_string(key);
-                        self.ser.output.push(b'=');
-                    }
-                }
-
-                self.mode = CompoundMode::Struct {
-                    attr_open,
-                    body_open,
-                };
+            CompoundMode::Struct(state) => {
+                let next = self.write_struct_field(state, key)?;
+                self.mode = CompoundMode::Struct(next);
                 value.serialize(&mut *self.ser)?;
             }
             _ => {
                 self.check_first();
                 self.ser.write_string(key);
-                self.ser.output.push(b'=');
+                self.ser.writer().key_value_separator();
                 value.serialize(&mut *self.ser)?;
             }
         }
@@ -494,22 +507,26 @@ impl ser::SerializeStruct for Compound<'_> {
     }
 
     fn end(self) -> Result<(), Self::Error> {
-        match self.mode {
-            CompoundMode::Attr => self.ser.output.push(b'>'),
-            CompoundMode::Seq | CompoundMode::VariantSeq => self.ser.output.push(b']'),
-            CompoundMode::Struct {
-                attr_open,
-                body_open,
-            } => {
-                if attr_open {
-                    self.ser.output.push(b'>');
+        let mode = self.mode;
+        let mut w = self.ser.writer();
+        match mode {
+            CompoundMode::Attr => w.end_attributes(),
+            CompoundMode::Seq | CompoundMode::VariantSeq => w.end_list(),
+            // Every arm leaves exactly one value behind.
+            CompoundMode::Struct(state) => match state {
+                StructState::Start => {
+                    w.begin_map();
+                    w.end_map();
                 }
-                if body_open {
-                    self.ser.output.push(b'}');
+                StructState::Attrs => {
+                    w.end_attributes();
+                    w.write_entity();
                 }
-            }
+                StructState::Body => w.end_map(),
+                StructState::Value => {}
+            },
             CompoundMode::AttrWrapper => {}
-            _ => self.ser.output.push(b'}'),
+            _ => w.end_map(),
         }
         Ok(())
     }
@@ -526,13 +543,9 @@ impl ser::SerializeStructVariant for Compound<'_> {
         ser::SerializeStruct::serialize_field(self, k, v)
     }
     fn end(self) -> Result<(), Self::Error> {
-        self.ser.output.extend_from_slice(b"}}");
+        let mut w = self.ser.writer();
+        w.end_map();
+        w.end_map();
         Ok(())
     }
-}
-
-fn is_safe_unquoted(b: &[u8]) -> bool {
-    matches!(b.first(), Some(f) if f.is_ascii_alphabetic() || *f == b'_')
-        && b.iter()
-            .all(|&c| c.is_ascii_alphanumeric() || b"_-.".contains(&c))
 }

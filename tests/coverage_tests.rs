@@ -1,10 +1,12 @@
+#![cfg(feature = "serde")]
+
 #[cfg(test)]
 mod coverage_tests {
     use std::collections::BTreeMap;
 
     use serde::{Deserialize, Serialize};
     use yson_rs::{
-        StreamDeserializer, WithAttributes, YsonError, YsonFormat, YsonNode, YsonValue, from_slice,
+        Scan, WithAttributes, YsonError, YsonFormat, YsonNode, YsonValue, from_slice, scan_value,
         to_string, to_vec,
     };
 
@@ -33,13 +35,20 @@ mod coverage_tests {
 
     #[test]
     fn test_lexer_comments() {
-        let comment = "10 // This is comment \n 20";
+        // Comments are insignificant, before the value and after it.
+        let comment = "10 // This is comment \n";
         let val: i64 = from_slice(comment.as_bytes(), YsonFormat::Text).unwrap();
         assert_eq!(val, 10);
 
-        let data2 = "10 /* Multiline \n comment */ 20";
+        let data2 = "/* Multiline \n comment */ 10 /* and after */";
         let val2: i64 = from_slice(data2.as_bytes(), YsonFormat::Text).unwrap();
         assert_eq!(val2, 10);
+
+        // A *second value* is not insignificant. This used to answer `Ok(10)`
+        // and throw the rest away; a sequence of values is framed with
+        // `scan_value`.
+        assert!(from_slice::<i64>(b"10 // c \n 20", YsonFormat::Text).is_err());
+        assert!(from_slice::<i64>(b"10 /* c */ 20", YsonFormat::Text).is_err());
     }
 
     #[test]
@@ -184,15 +193,29 @@ mod coverage_tests {
         assert_eq!(err, YsonError::Custom("custom_ser_error".into()));
     }
 
-    #[test]
-    fn test_stream_deserializer() {
-        let input = b"1; 2; 3";
-        let mut stream = StreamDeserializer::<i32>::new(input, false);
+    /// Frames a list fragment with `scan_value`, the way a streaming reader
+    /// does: measure the next value, decode that slice, step over the `;`.
+    fn frame_i32s(input: &[u8]) -> Vec<i32> {
+        let mut out = Vec::new();
+        let mut rest = input;
+        loop {
+            while matches!(rest.first(), Some(b) if *b == b';' || b.is_ascii_whitespace()) {
+                rest = &rest[1..];
+            }
+            if rest.is_empty() {
+                return out;
+            }
+            let Scan::Complete(len) = scan_value(rest, YsonFormat::Text).unwrap() else {
+                panic!("truncated fragment: {rest:?}");
+            };
+            out.push(from_slice::<i32>(&rest[..len], YsonFormat::Text).unwrap());
+            rest = &rest[len..];
+        }
+    }
 
-        assert_eq!(stream.next_item().unwrap(), Some(1));
-        assert_eq!(stream.next_item().unwrap(), Some(2));
-        assert_eq!(stream.next_item().unwrap(), Some(3));
-        assert_eq!(stream.next_item().unwrap(), None);
+    #[test]
+    fn test_value_sequence_framing() {
+        assert_eq!(frame_i32s(b"1; 2; 3"), vec![1, 2, 3]);
     }
 
     #[test]
@@ -408,18 +431,14 @@ mod coverage_tests {
     }
 
     #[test]
-    fn test_stream_deserializer_semicolon_eof() {
-        let data = "1;2;";
-        let mut iter = StreamDeserializer::<i32>::new(data.as_bytes(), false);
-        assert_eq!(iter.next_item().unwrap(), Some(1));
-        assert_eq!(iter.next_item().unwrap(), Some(2));
-        assert_eq!(iter.next_item().unwrap(), None);
+    fn test_value_sequence_trailing_separator() {
+        assert_eq!(frame_i32s(b"1;2;"), vec![1, 2]);
     }
 
     #[test]
     fn test_serialize_bytes_text_non_ascii() {
         let bytes = vec![0, 1, 2, 128, 255];
-        let mut ser = yson_rs::ser::Serializer::new(false);
+        let mut ser = yson_rs::Serializer::new(YsonFormat::Text);
         serde::Serializer::serialize_bytes(&mut ser, &bytes).unwrap();
         let res = String::from_utf8(ser.output).unwrap();
         assert!(res.contains("\\x00"));

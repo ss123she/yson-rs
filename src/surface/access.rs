@@ -2,9 +2,30 @@ use serde::de::{
     self, DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor,
     value::StringDeserializer,
 };
-use std::borrow::Cow;
 
-use crate::{de::Deserializer, error::YsonError, node::Token};
+use crate::core::error::YsonError;
+use crate::core::token::Token;
+use crate::surface::de::Deserializer;
+
+/// Hands a map key to a visitor as raw bytes, with no UTF-8 validation.
+struct ByteKeyDeserializer(Vec<u8>);
+
+impl<'de> de::Deserializer<'de> for ByteKeyDeserializer {
+    type Error = YsonError;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_byte_buf(self.0)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
 
 #[derive(PartialEq)]
 enum FlatState {
@@ -25,17 +46,17 @@ impl<'a, 'de> FlatStructAccess<'a, 'de> {
     pub(crate) fn new(de: &'a mut Deserializer<'de>) -> Result<Self, YsonError> {
         de.enter_recursion()?;
 
-        let state = match de.lexer.peek_byte()? {
+        let state = match de.reader.peek_byte()? {
             b'<' => {
-                de.lexer.next_token()?;
+                de.reader.next_token()?;
                 FlatState::Attributes
             }
             b'{' => {
-                de.lexer.next_token()?;
+                de.reader.next_token()?;
                 FlatState::Body
             }
             b'#' => {
-                de.lexer.next_token()?;
+                de.reader.next_token()?;
                 FlatState::Done
             }
             _ => FlatState::ValueOnly,
@@ -65,41 +86,40 @@ impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
         loop {
             match self.state {
                 FlatState::Attributes => {
-                    let peeked = self.de.lexer.peek_byte()?;
+                    let peeked = self.de.reader.peek_byte()?;
                     if peeked == b'>' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         self.state = FlatState::Between;
                         continue;
                     }
                     if peeked == b';' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         continue;
                     }
 
-                    let token = self.de.lexer.next_token()?;
+                    let token = self.de.reader.next_token()?;
                     if let Token::String(s) = token {
-                        let key_str = match &s {
-                            Cow::Borrowed(b) => std::str::from_utf8(b).unwrap_or(""),
-                            Cow::Owned(vec) => std::str::from_utf8(vec).unwrap_or(""),
-                        };
-                        let prefixed = format!("@{key_str}");
-                        let deserializer: StringDeserializer<YsonError> =
-                            prefixed.into_deserializer();
+                        // Attribute names are arbitrary byte strings, so the key goes to
+                        // the visitor as bytes. `#[serde(rename = "@name")]` still
+                        // matches: derived field identifiers implement `visit_bytes`.
+                        let mut prefixed = Vec::with_capacity(s.len() + 1);
+                        prefixed.push(b'@');
+                        prefixed.extend_from_slice(&s);
                         self.is_value_only = false;
-                        return seed.deserialize(deserializer).map(Some);
+                        return seed.deserialize(ByteKeyDeserializer(prefixed)).map(Some);
                     }
                     return Err(YsonError::Custom(
                         "Expected string key in attributes".into(),
                     ));
                 }
                 FlatState::Between => {
-                    let peeked = self.de.lexer.peek_byte()?;
+                    let peeked = self.de.reader.peek_byte()?;
                     if peeked == b'{' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         self.state = FlatState::Body;
                         continue;
                     } else if peeked == b'#' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         self.state = FlatState::Done;
                         return Ok(None);
                     }
@@ -107,14 +127,14 @@ impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
                     continue;
                 }
                 FlatState::Body => {
-                    let peeked = self.de.lexer.peek_byte()?;
+                    let peeked = self.de.reader.peek_byte()?;
                     if peeked == b'}' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         self.state = FlatState::Done;
                         return Ok(None);
                     }
                     if peeked == b';' {
-                        self.de.lexer.next_token()?;
+                        self.de.reader.next_token()?;
                         continue;
                     }
 
@@ -141,7 +161,7 @@ impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
             return seed.deserialize(&mut *self.de);
         }
 
-        let token = self.de.lexer.next_token()?;
+        let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
             return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
         }
@@ -178,11 +198,11 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
 
     fn unit_variant(self) -> Result<(), Self::Error> {
         if self.is_map_wrapped {
-            let token = self.de.lexer.next_token()?;
+            let token = self.de.reader.next_token()?;
             if token != Token::KeyValueSeparator {
                 return Err(YsonError::Custom("Expected '='".into()));
             }
-            let val_token = self.de.lexer.next_token()?;
+            let val_token = self.de.reader.next_token()?;
             if val_token != Token::Entity {
                 return Err(YsonError::Custom(
                     "Expected '#' for unit variant in map".into(),
@@ -196,7 +216,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     where
         T: de::DeserializeSeed<'de>,
     {
-        let token = self.de.lexer.next_token()?;
+        let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
             return Err(YsonError::Custom("Expected '='".into()));
         }
@@ -207,7 +227,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     where
         V: Visitor<'de>,
     {
-        let token = self.de.lexer.next_token()?;
+        let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
             return Err(YsonError::Custom("Expected '='".into()));
         }
@@ -222,7 +242,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     where
         V: Visitor<'de>,
     {
-        let token = self.de.lexer.next_token()?;
+        let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
             return Err(YsonError::Custom("Expected '='".into()));
         }
@@ -289,6 +309,11 @@ impl<'de> SeqAccess<'de> for AttributesWrapperAccess<'_, 'de> {
     }
 }
 
+/// Walks the items of a container the deserializer has already opened,
+/// stopping at the terminator without consuming it.
+///
+/// Closing is the job of whoever wrote the opening token -- see
+/// [`Deserializer::close_container`].
 pub(crate) struct CommaSeparated<'a, 'de: 'a> {
     de: &'a mut Deserializer<'de>,
     end_byte: u8,
@@ -298,6 +323,23 @@ impl<'a, 'de> CommaSeparated<'a, 'de> {
     pub(crate) fn new(de: &'a mut Deserializer<'de>, end_byte: u8) -> Result<Self, YsonError> {
         de.enter_recursion()?;
         Ok(CommaSeparated { de, end_byte })
+    }
+
+    /// Positions the reader at the next item.
+    ///
+    /// Returns `false` at the terminator, which is left in the input.
+    fn advance_to_item(&mut self) -> Result<bool, YsonError> {
+        loop {
+            let peeked = self.de.reader.peek_byte()?;
+            if peeked == self.end_byte {
+                return Ok(false);
+            }
+            if peeked == b';' {
+                self.de.reader.next_token()?;
+                continue;
+            }
+            return Ok(true);
+        }
     }
 }
 
@@ -314,19 +356,8 @@ impl<'de> MapAccess<'de> for CommaSeparated<'_, 'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        let peeked = self.de.lexer.peek_byte()?;
-        if peeked == self.end_byte {
-            self.de.lexer.next_token()?;
+        if !self.advance_to_item()? {
             return Ok(None);
-        }
-
-        if peeked == b';' {
-            self.de.lexer.next_token()?;
-
-            if self.de.lexer.peek_byte()? == self.end_byte {
-                self.de.lexer.next_token()?;
-                return Ok(None);
-            }
         }
 
         seed.deserialize(&mut *self.de).map(Some)
@@ -336,7 +367,7 @@ impl<'de> MapAccess<'de> for CommaSeparated<'_, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        let token = self.de.lexer.next_token()?;
+        let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
             return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
         }
@@ -352,19 +383,8 @@ impl<'de> SeqAccess<'de> for CommaSeparated<'_, 'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        let peeked = self.de.lexer.peek_byte()?;
-        if peeked == self.end_byte {
-            self.de.lexer.next_token()?;
+        if !self.advance_to_item()? {
             return Ok(None);
-        }
-
-        if peeked == b';' {
-            self.de.lexer.next_token()?;
-
-            if self.de.lexer.peek_byte()? == self.end_byte {
-                self.de.lexer.next_token()?;
-                return Ok(None);
-            }
         }
 
         seed.deserialize(&mut *self.de).map(Some)

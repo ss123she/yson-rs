@@ -1,21 +1,23 @@
+#![cfg(feature = "serde")]
+
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
-use yson_rs::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
+use yson_rs::{Deserializer, Serializer, WithAttributes, YsonFormat};
 
 use crate::common::*;
 
 mod common;
 
-fn roundtrip<T>(value: &T, is_binary: bool) -> T
+fn roundtrip<T>(value: &T, format: YsonFormat) -> T
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
 {
-    let mut serializer = Serializer::new(is_binary);
+    let mut serializer = Serializer::new(format);
     value
         .serialize(&mut serializer)
         .expect("Serialization failed");
 
-    let mut deserializer = Deserializer::from_bytes(&serializer.output, is_binary);
+    let mut deserializer = Deserializer::new(&serializer.output, format);
     T::deserialize(&mut deserializer).expect("Deserialization failed")
 }
 
@@ -68,22 +70,22 @@ proptest! {
         i in any::<i64>(),
         s in "[a-zA-Z0-9_]*",
     ) {
-        assert_eq!(b, roundtrip(&b, true));
-        assert_eq!(u, roundtrip(&u, true));
-        assert_eq!(i, roundtrip(&i, true));
-        assert_eq!(s, roundtrip(&s, true));
+        assert_eq!(b, roundtrip(&b, YsonFormat::Binary));
+        assert_eq!(u, roundtrip(&u, YsonFormat::Binary));
+        assert_eq!(i, roundtrip(&i, YsonFormat::Binary));
+        assert_eq!(s, roundtrip(&s, YsonFormat::Binary));
 
-        assert_eq!(b, roundtrip(&b, false));
-        assert_eq!(u, roundtrip(&u, false));
-        assert_eq!(i, roundtrip(&i, false));
-        assert_eq!(s, roundtrip(&s, false));
+        assert_eq!(b, roundtrip(&b, YsonFormat::Text));
+        assert_eq!(u, roundtrip(&u, YsonFormat::Text));
+        assert_eq!(i, roundtrip(&i, YsonFormat::Text));
+        assert_eq!(s, roundtrip(&s, YsonFormat::Text));
     }
 
     #[test]
     fn prop_roundtrip_f64(v in any::<f64>()) {
         if !v.is_nan() {
-            assert_eq!(v, roundtrip(&v, true));
-            assert_eq!(v, roundtrip(&v, false));
+            assert_eq!(v, roundtrip(&v, YsonFormat::Binary));
+            assert_eq!(v, roundtrip(&v, YsonFormat::Text));
         }
     }
 
@@ -95,13 +97,13 @@ proptest! {
             0..10
         )
     ) {
-        assert_eq!(v, roundtrip(&v, true));
-        assert_eq!(v, roundtrip(&v, false));
+        assert_eq!(v, roundtrip(&v, YsonFormat::Binary));
+        assert_eq!(v, roundtrip(&v, YsonFormat::Text));
     }
 
     #[test]
     fn prop_roundtrip_complex_entity(v in complex_entity_strategy()) {
-        assert_eq!(v, roundtrip(&v, true));
-        assert_eq!(v, roundtrip(&v, false));
+        assert_eq!(v, roundtrip(&v, YsonFormat::Binary));
+        assert_eq!(v, roundtrip(&v, YsonFormat::Text));
     }
 }

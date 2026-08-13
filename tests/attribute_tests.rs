@@ -1,17 +1,19 @@
+#![cfg(feature = "serde")]
+
 use serde::{Deserialize, Serialize};
-use yson_rs::{attributes::WithAttributes, de::Deserializer, ser::Serializer};
+use yson_rs::{Deserializer, Serializer, WithAttributes, YsonFormat};
 mod common;
 
-fn roundtrip<T>(value: &T, is_binary: bool) -> T
+fn roundtrip<T>(value: &T, format: YsonFormat) -> T
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
 {
-    let mut serializer = Serializer::new(is_binary);
+    let mut serializer = Serializer::new(format);
     value
         .serialize(&mut serializer)
         .expect("Serialization failed");
 
-    let mut deserializer = Deserializer::from_bytes(&serializer.output, is_binary);
+    let mut deserializer = Deserializer::new(&serializer.output, format);
     T::deserialize(&mut deserializer).expect("Deserialization failed")
 }
 
@@ -36,7 +38,7 @@ mod unit_tests {
             },
         };
 
-        let mut serializer = Serializer::new(false);
+        let mut serializer = Serializer::new(YsonFormat::Text);
         data.serialize(&mut serializer).unwrap();
         let result = String::from_utf8(serializer.output).unwrap();
 
@@ -52,7 +54,7 @@ mod unit_tests {
     fn test_deserialize_with_attributes_text() {
         let input = b"<\"active\"=%true; \"role\"=\"admin\">{\"name\"=\"Alice\"; \"age\"=30u}";
 
-        let mut deserializer = Deserializer::from_bytes(input, false);
+        let mut deserializer = Deserializer::new(input, YsonFormat::Text);
         let result: WithAttributes<User, Meta> =
             WithAttributes::deserialize(&mut deserializer).expect("Failed to deserialize");
 
@@ -66,7 +68,7 @@ mod unit_tests {
     fn test_deserialize_fallback_without_attributes() {
         let input = b"{name=Bob; age=25u}";
 
-        let mut deserializer = Deserializer::from_bytes(input, false);
+        let mut deserializer = Deserializer::new(input, YsonFormat::Text);
         let result: WithAttributes<User, Option<Meta>> =
             WithAttributes::deserialize(&mut deserializer).unwrap();
 
@@ -88,7 +90,7 @@ mod unit_tests {
             },
         };
 
-        let result = roundtrip(&data, true);
+        let result = roundtrip(&data, YsonFormat::Binary);
         assert_eq!(data, result);
     }
 
@@ -108,8 +110,8 @@ mod unit_tests {
             },
         };
 
-        assert_eq!(nested, roundtrip(&nested, false));
-        assert_eq!(nested, roundtrip(&nested, true));
+        assert_eq!(nested, roundtrip(&nested, YsonFormat::Text));
+        assert_eq!(nested, roundtrip(&nested, YsonFormat::Binary));
     }
 
     #[test]
@@ -137,11 +139,11 @@ mod unit_tests {
     #[test]
     fn test_advanced_enums() {
         let num = Untagged::Number(42);
-        assert_eq!(num, roundtrip(&num, false));
+        assert_eq!(num, roundtrip(&num, YsonFormat::Text));
 
         let msg = AdjacentlyTagged::Message {
             text: "Hello".into(),
         };
-        assert_eq!(msg, roundtrip(&msg, false));
+        assert_eq!(msg, roundtrip(&msg, YsonFormat::Text));
     }
 }

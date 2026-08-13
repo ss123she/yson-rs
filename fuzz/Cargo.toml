@@ -9,9 +9,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-serde = "1.0.228"
 
-[dependencies.yson]
+[dependencies.yson-rs]
 path = ".."
 
 [[bin]]

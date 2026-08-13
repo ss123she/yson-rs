@@ -1,7 +1,7 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use std::hint::black_box;
-use yson_rs::{de::Deserializer, ser::Serializer};
+use yson_rs::{Deserializer, Reader, Serializer, YsonFormat, scan_value};
 
 use std::collections::HashMap;
 
@@ -41,11 +41,11 @@ fn generate_data() -> Vec<BenchData<'static>> {
 fn criterion_benchmark(c: &mut Criterion) {
     let data = generate_data();
 
-    let mut ser_bin = Serializer::new(true);
+    let mut ser_bin = Serializer::new(YsonFormat::Binary);
     data.serialize(&mut ser_bin).unwrap();
     let bin_bytes = ser_bin.output;
 
-    let mut ser_text = Serializer::new(false);
+    let mut ser_text = Serializer::new(YsonFormat::Text);
     data.serialize(&mut ser_text).unwrap();
     let text_bytes = ser_text.output;
 
@@ -55,7 +55,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(bin_bytes.len() as u64));
     group.bench_function("Serialize Binary", |b| {
         b.iter(|| {
-            let mut ser = Serializer::new(true);
+            let mut ser = Serializer::new(YsonFormat::Binary);
             black_box(&data).serialize(&mut ser).unwrap();
         });
     });
@@ -63,7 +63,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // Bench: Deserialize Binary
     group.bench_function("Deserialize Binary", |b| {
         b.iter(|| {
-            let mut de = Deserializer::from_bytes(black_box(&bin_bytes), true);
+            let mut de = Deserializer::new(black_box(&bin_bytes), YsonFormat::Binary);
             let _val: Vec<BenchData> = Vec::deserialize(&mut de).unwrap();
         });
     });
@@ -72,7 +72,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(text_bytes.len() as u64));
     group.bench_function("Serialize Text", |b| {
         b.iter(|| {
-            let mut ser = Serializer::new(false);
+            let mut ser = Serializer::new(YsonFormat::Text);
             black_box(&data).serialize(&mut ser).unwrap();
         });
     });
@@ -80,9 +80,54 @@ fn criterion_benchmark(c: &mut Criterion) {
     // Bench: Deserialize Text
     group.bench_function("Deserialize Text", |b| {
         b.iter(|| {
-            let mut de = Deserializer::from_bytes(black_box(&text_bytes), false);
+            let mut de = Deserializer::new(black_box(&text_bytes), YsonFormat::Text);
             let _val: Vec<BenchData> = Vec::deserialize(&mut de).unwrap();
         });
+    });
+
+    group.finish();
+
+    dom_benchmark(c, &bin_bytes, &text_bytes);
+}
+
+/// The untyped path, where borrowing is worth the most.
+///
+/// `read_value` against `read_value().into_owned()` is the whole borrowed-DOM
+/// change expressed as two numbers: the same parse, with and without copying
+/// every string out of the buffer it is already in.
+fn dom_benchmark(c: &mut Criterion, bin_bytes: &[u8], text_bytes: &[u8]) {
+    let mut group = c.benchmark_group("YSON DOM");
+
+    group.throughput(Throughput::Bytes(bin_bytes.len() as u64));
+    group.bench_function("Read borrowed (binary)", |b| {
+        b.iter(|| {
+            Reader::new(black_box(bin_bytes), YsonFormat::Binary)
+                .read_value()
+                .unwrap()
+        });
+    });
+    group.bench_function("Read owned (binary)", |b| {
+        b.iter(|| {
+            Reader::new(black_box(bin_bytes), YsonFormat::Binary)
+                .read_value()
+                .unwrap()
+                .into_owned()
+        });
+    });
+    group.bench_function("Scan (binary)", |b| {
+        b.iter(|| scan_value(black_box(bin_bytes), YsonFormat::Binary).unwrap());
+    });
+
+    group.throughput(Throughput::Bytes(text_bytes.len() as u64));
+    group.bench_function("Read borrowed (text)", |b| {
+        b.iter(|| {
+            Reader::new(black_box(text_bytes), YsonFormat::Text)
+                .read_value()
+                .unwrap()
+        });
+    });
+    group.bench_function("Scan (text)", |b| {
+        b.iter(|| scan_value(black_box(text_bytes), YsonFormat::Text).unwrap());
     });
 
     group.finish();
