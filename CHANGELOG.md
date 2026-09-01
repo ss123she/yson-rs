@@ -16,6 +16,14 @@ All notable changes to this crate are recorded here. The format follows
   `cargo test --no-default-features` stays green; `dom` and `stream` build
   with the feature off.
 
+### Fixed
+
+- Documentation only, no behaviour change. A comment in `core::reader`'s
+  escape table described a fixed defect as if it were current behaviour, and
+  the defect counts in `AGENTS.md` and the 0.2.0 section above now agree with
+  their own tables: five of the ten from the fork, not eight; six silent
+  defects, not five; 236 tests, not 211.
+
 ## [0.2.0] — released
 
 Everything since `ba2044c` (published as 0.1.3). **This release is breaking**:
@@ -101,10 +109,10 @@ than an error. Each has a named regression test.
   hex-escaped: text output is always valid UTF-8, and the two paths agree
   byte for byte. Found by the Go interop fixtures.
 
-Two further defects reported against 0.1.3 were already fixed in the working
+Three further defects reported against 0.1.3 were already fixed in the working
 tree before this changelog began, and now have regression tests: a stray `/` in
-text input looped forever in `skip_ignored`, and non-UTF-8 map keys and
-attribute names were rejected or silently renamed to `""`.
+text input looped forever in `skip_ignored`, non-UTF-8 map keys were rejected,
+and non-UTF-8 attribute names were silently renamed to `""`.
 (`src/core/reader.rs`, `tests/regression_tests.rs`)
 
 ### Added
@@ -218,7 +226,8 @@ attribute names were rejected or silently renamed to `""`.
 
 ### Testing
 
-Test count went from 9 to 211. The suites that did not exist before:
+Test count went from 49 unit and integration tests to 236 (207 unit and
+integration, 29 doc). The suites that did not exist before:
 
 - `tests/interop_tests.rs` — round trips against fixtures produced by the **Go**
   YSON implementation (`go.ytsaurus.tech/yt/go/yson`), vendored from
@@ -263,7 +272,7 @@ on it.
   every typed struct as well.
 - Maps round-trip as *values*, not byte for byte: `YsonNode::Map` is a
   `BTreeMap`, so keys come back in sorted order rather than in input order.
-  `Row::raw`-style pass-through of the original bytes is the way to preserve
+  Keeping the original bytes and passing them through is the way to preserve
   order exactly.
 - A missing `;` between items is accepted — `[1 2]` parses as `[1;2]`.
   `scan_value` deliberately matches the reader here, because a scanner stricter
@@ -323,13 +332,15 @@ and both are the point of the change:
 
 ### Acknowledgements
 
-Most of the defects fixed above were **not found here**. Eight of the ten were
-found by [@sshaplygin](https://github.com/sshaplygin) while vendoring `ba2044c`
+Most of the defects fixed above were **not found here**. Eight were found by
+[@sshaplygin](https://github.com/sshaplygin) while vendoring `ba2044c`
 into [ytsaurus-rs](https://github.com/sshaplygin/ytsaurus-rs) as
 `ytsaurus-yson`: three were reported as
 [ss123she/yson-rs#1](https://github.com/ss123she/yson-rs/issues/1), and five
 more were documented in that fork's own `CHANGELOG` as required by
-Apache-2.0 §4(b).
+Apache-2.0 §4(b). Of the ten listed above, five are from that set — the three
+issue reports were fixed before this changelog began and are not part of the
+ten.
 
 Found there, fixed here:
 

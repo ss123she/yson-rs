@@ -1,7 +1,7 @@
 A fast and compliant [YSON](https://ytsaurus.tech/docs/en/user-guide/storage/yson) serializer and deserializer for Rust, built on top of serde.
 
 ## Features
-YSON Support: Handles Text, Binary formats.
+Both text and binary formats, through one API.
 
 ## Installation
 Add this to your `Cargo.toml`:
@@ -90,7 +90,7 @@ struct User {
     name: String,
     age: i32,
 }
-// YSON: {name=Alice; age=42}
+// YSON: {name=Alice;age=42}
 ```
 
 ### 2. Attributes
@@ -104,7 +104,7 @@ struct Table {
     
     path: String,
 }
-// YSON: <row_count=100>{path="/home/tables"}
+// YSON: <row_count=100u>{path="/home/tables"}
 ```
 
 ### 3. Attributed Values ($value)
@@ -149,7 +149,7 @@ fn main() -> Result<(), yson_rs::YsonError> {
     // Serialize to Text YSON
     let text_yson = to_string(&table, YsonFormat::Text)?;
     println!("Text: {}", text_yson);
-    // Output: <author=admin;row_count=2u>["first";"second"]
+    // Output: <row_count=2u;author=admin>[first;second]
 
     // Deserialize back
     let decoded: Table = from_slice(text_yson.as_bytes(), YsonFormat::Text)?;
@@ -165,5 +165,5 @@ It is vendored and used by [sshaplygin/ytsaurus-rs](https://github.com/sshaplygi
 
 All improvements, performance optimizations, and bug fixes discovered in downstream production usage have been upstreamed back into this repository.
 
-### License
+## License
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) license at your option.
