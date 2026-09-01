@@ -4,7 +4,19 @@ All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — unreleased
+## [0.2.1] — unreleased
+
+### Added
+
+- **`examples/`** — four runnable examples, built by `cargo test` and run with
+  `cargo run --example …`: `typed` (a Rust type through serde, both formats),
+  `attributes` (`@name`/`$value` fields and `WithAttributes`), `dom` (the
+  borrowed value tree, no serde), and `stream` (framing a list fragment).
+  `typed` and `attributes` declare `required-features = ["serde"]`, so
+  `cargo test --no-default-features` stays green; `dom` and `stream` build
+  with the feature off.
+
+## [0.2.0] — released
 
 Everything since `ba2044c` (published as 0.1.3). **This release is breaking**:
 the value tree gained a lifetime, and the constructors take a `YsonFormat`
