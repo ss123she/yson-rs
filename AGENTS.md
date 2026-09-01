@@ -11,7 +11,7 @@ serializer and deserializer for Rust, text and binary. YSON is
 it, and the HTTP API speaks it. This crate is the codec alone — no cluster
 client, no job runtime.
 
-Single crate, `yson-rs` 0.2.0, edition 2024, licensed **MIT OR Apache-2.0**
+Single crate, `yson-rs` 0.2.1, edition 2024, licensed **MIT OR Apache-2.0**
 (both files are in the root and stay there).
 
 ## Layout

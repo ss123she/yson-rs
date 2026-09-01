@@ -7,7 +7,7 @@ Both text and binary formats, through one API.
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-yson-rs = "0.2.0"
+yson-rs = "0.2.1"
 serde = { version = "1.0", features = ["derive"] }
 ```
 
