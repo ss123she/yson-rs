@@ -579,7 +579,7 @@ fn decode_escapes(raw: &[u8]) -> Result<Vec<u8>, YsonError> {
         }
 
         match raw[i] {
-            // C escapes: \\a\\b\\f\\v fall through to letter (backspace becomes `b`).
+            // The whole C set; \a \b \f \v were once missing and decoded to the letter.
             b'a' => out.push(0x07),
             b'b' => out.push(0x08),
             b'f' => out.push(0x0C),
