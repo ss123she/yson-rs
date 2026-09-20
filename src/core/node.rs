@@ -109,6 +109,15 @@ impl<'a> YsonValue<'a> {
         }
     }
 
+    /// The node as a list, if it as a string.
+    #[must_use]
+    pub fn as_list(&self) -> Option<&[u8]> {
+        match &self.node {
+            YsonNode::String(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+
     /// The node as a UTF-8 string, if it is a string and the bytes are UTF-8.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
