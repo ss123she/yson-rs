@@ -37,4 +37,17 @@ impl YsonFormat {
     pub const fn is_binary(self) -> bool {
         matches!(self, YsonFormat::Binary)
     }
+
+    /// Returns `true` for [`YsonFormat::Text`].
+    ///
+    /// ```
+    /// use yson_rs::YsonFormat;
+    ///
+    /// assert!(YsonFormat::Text.is_text());
+    /// assert!(!YsonFormat::Binary.is_text());
+    /// ```
+    #[must_use]
+    pub const fn is_text(self) -> bool {
+        matches!(self, YsonFormat::Text)
+    }
 }
