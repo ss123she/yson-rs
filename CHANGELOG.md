@@ -15,14 +15,13 @@ All notable changes to this crate are recorded here. The format follows
   `typed` and `attributes` declare `required-features = ["serde"]`, so
   `cargo test --no-default-features` stays green; `dom` and `stream` build
   with the feature off.
+- **`YsonValue::is_entity`** - whether the node is `#`.
+- **`FrameReader::into_inner`** - recovers the underlying reader after
+  framing; buffered, unframed bytes are dropped.
 
 ### Fixed
 
-- Documentation only, no behaviour change. A comment in `core::reader`'s
-  escape table described a fixed defect as if it were current behaviour, and
-  the defect counts in `AGENTS.md` and the 0.2.0 section above now agree with
-  their own tables: five of the ten from the fork, not eight; six silent
-  defects, not five; 236 tests, not 211.
+- Documentation only, no behaviour change.
 
 ## [0.2.0] — released
 
