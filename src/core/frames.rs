@@ -213,6 +213,16 @@ impl<R: Read> FrameReader<R> {
         self.base_offset + self.pos as u64
     }
 
+    /// Consumes this wrapper, returning the underlying reader.
+    ///
+    /// # Warning
+    ///
+    /// Bytes already read into the internal buffer but not yet handed out as
+    /// frames are lost. Finish framing before unwrapping.
+    pub fn into_inner(self) -> R {
+        self.input
+    }
+
     /// Returns the next complete record, or `None` at the end of the stream.
     ///
     /// The frame borrows the reader's buffer, so it must be dropped -- or
@@ -536,6 +546,13 @@ mod tests {
             assert!(reader.position() >= seen);
         }
         assert_eq!(reader.position(), input.len() as u64);
+    }
+
+    #[test]
+    fn underlying_reader_comes_back() {
+        let reader = FrameReader::new(&b"1;2;3"[..], YsonFormat::Text);
+        assert_eq!(read_all(reader).len(), 3);
+        // consumed to the end, so the slice comes back empty
     }
 
     #[test]
