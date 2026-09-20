@@ -213,6 +213,12 @@ impl<'a> YsonValue<'a> {
     pub fn attr_bytes(&self, key: &[u8]) -> Option<&YsonValue<'a>> {
         self.attributes.as_ref()?.get(key)
     }
+
+    /// Returns `true` if the node is an entity (`#`).
+    #[must_use]
+    pub fn is_entity(&self) -> bool {
+        matches!(self.node, YsonNode::Entity)
+    }
 }
 
 impl<'a> std::ops::Index<&'a str> for YsonValue<'_> {
