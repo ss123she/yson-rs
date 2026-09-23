@@ -351,7 +351,7 @@ impl Compound<'_> {
                 StructState::Attrs => {}
                 // Attributes stand strictly before the value they decorate.
                 StructState::Body | StructState::Value => {
-                    return Err(YsonError::Custom(format!(
+                    return Err(YsonError::Message(format!(
                         "the attribute field `{key}` comes after the value body; \
                          YSON attributes stand before the value they decorate, \
                          so `@`-renamed fields must be declared first"
@@ -370,14 +370,14 @@ impl Compound<'_> {
                 StructState::Attrs => self.ser.writer().end_attributes(),
                 // One value cannot have two bodies.
                 StructState::Body => {
-                    return Err(YsonError::Custom(
+                    return Err(YsonError::Message(
                         "the `$value` field comes after plain fields; a value has \
                          either a `$value` body or a map body of plain fields, not both"
                             .into(),
                     ));
                 }
                 StructState::Value => {
-                    return Err(YsonError::Custom(
+                    return Err(YsonError::Message(
                         "two `$value` fields in one struct".into(),
                     ));
                 }
@@ -397,7 +397,7 @@ impl Compound<'_> {
             }
             StructState::Body => {}
             StructState::Value => {
-                return Err(YsonError::Custom(format!(
+                return Err(YsonError::Message(format!(
                     "the plain field `{key}` comes after a `$value` body; a value has \
                      either a `$value` body or a map body of plain fields, not both"
                 )));

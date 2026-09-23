@@ -19,6 +19,13 @@ All notable changes to this crate are recorded here. The format follows
 - **`FrameReader::into_inner`** - recovers the underlying reader after
   framing; buffered, unframed bytes are dropped.
 
+### Changed
+
+- **`YsonError` vocabulary split** - errors this crate generates itself
+  are now `YsonError::Message`.
+  `Custom` is now produced only by the serde `Error` impls, matching its display.
+  Breaking for code matching `Custom`.
+
 ### Fixed
 
 - Documentation only, no behaviour change.

@@ -90,7 +90,7 @@ pub fn scan_value_with_max_depth(
 
 fn scan_one(reader: &mut Reader<'_>, depth: usize, max: usize) -> Result<(), YsonError> {
     if depth > max {
-        return Err(YsonError::Custom("Recursion limit exceeded".into()));
+        return Err(YsonError::Message("Recursion limit exceeded".into()));
     }
 
     if reader.peek_byte()? == b'<' {
@@ -107,13 +107,13 @@ fn scan_one(reader: &mut Reader<'_>, depth: usize, max: usize) -> Result<(), Yso
         | TokenKind::String => Ok(()),
         TokenKind::BeginList => scan_items(reader, depth + 1, max),
         TokenKind::BeginMap => scan_pairs(reader, b'}', depth + 1, max),
-        t => Err(YsonError::Custom(format!("Unexpected token: {t:?}"))),
+        t => Err(YsonError::Message(format!("Unexpected token: {t:?}"))),
     }
 }
 
 fn scan_items(reader: &mut Reader<'_>, depth: usize, max: usize) -> Result<(), YsonError> {
     if depth > max {
-        return Err(YsonError::Custom("Recursion limit exceeded".into()));
+        return Err(YsonError::Message("Recursion limit exceeded".into()));
     }
 
     loop {
@@ -132,7 +132,7 @@ fn scan_items(reader: &mut Reader<'_>, depth: usize, max: usize) -> Result<(), Y
 
 fn scan_pairs(reader: &mut Reader<'_>, end: u8, depth: usize, max: usize) -> Result<(), YsonError> {
     if depth > max {
-        return Err(YsonError::Custom("Recursion limit exceeded".into()));
+        return Err(YsonError::Message("Recursion limit exceeded".into()));
     }
 
     loop {
@@ -148,11 +148,11 @@ fn scan_pairs(reader: &mut Reader<'_>, end: u8, depth: usize, max: usize) -> Res
 
         match reader.skip_token()? {
             TokenKind::String => {}
-            t => return Err(YsonError::Custom(format!("Expected a key, got {t:?}"))),
+            t => return Err(YsonError::Message(format!("Expected a key, got {t:?}"))),
         }
         match reader.skip_token()? {
             TokenKind::KeyValueSeparator => {}
-            t => return Err(YsonError::Custom(format!("Expected '=', got {t:?}"))),
+            t => return Err(YsonError::Message(format!("Expected '=', got {t:?}"))),
         }
         scan_one(reader, depth, max)?;
     }

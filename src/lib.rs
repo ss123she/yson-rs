@@ -202,12 +202,12 @@ mod convenience {
     /// - Serialization fails due to internal structural constraints.
     pub fn to_string<T: Serialize>(value: &T, format: YsonFormat) -> Result<String, YsonError> {
         if format.is_binary() {
-            return Err(YsonError::Custom(
+            return Err(YsonError::Message(
                 "Cannot use to_string for binary format".into(),
             ));
         }
         let bytes = to_vec(value, format)?;
-        String::from_utf8(bytes).map_err(|_| YsonError::Custom("Invalid UTF-8 output".into()))
+        String::from_utf8(bytes).map_err(|_| YsonError::Message("Invalid UTF-8 output".into()))
     }
 }
 

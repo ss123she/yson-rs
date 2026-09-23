@@ -108,7 +108,7 @@ impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
                         self.is_value_only = false;
                         return seed.deserialize(ByteKeyDeserializer(prefixed)).map(Some);
                     }
-                    return Err(YsonError::Custom(
+                    return Err(YsonError::Message(
                         "Expected string key in attributes".into(),
                     ));
                 }
@@ -163,7 +163,7 @@ impl<'de> MapAccess<'de> for FlatStructAccess<'_, 'de> {
 
         let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
+            return Err(YsonError::Message(format!("Expected '=', got {token:?}")));
         }
         seed.deserialize(&mut *self.de)
     }
@@ -200,11 +200,11 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
         if self.is_map_wrapped {
             let token = self.de.reader.next_token()?;
             if token != Token::KeyValueSeparator {
-                return Err(YsonError::Custom("Expected '='".into()));
+                return Err(YsonError::Message("Expected '='".into()));
             }
             let val_token = self.de.reader.next_token()?;
             if val_token != Token::Entity {
-                return Err(YsonError::Custom(
+                return Err(YsonError::Message(
                     "Expected '#' for unit variant in map".into(),
                 ));
             }
@@ -218,7 +218,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     {
         let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom("Expected '='".into()));
+            return Err(YsonError::Message("Expected '='".into()));
         }
         seed.deserialize(self.de)
     }
@@ -229,7 +229,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     {
         let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom("Expected '='".into()));
+            return Err(YsonError::Message("Expected '='".into()));
         }
         de::Deserializer::deserialize_seq(self.de, visitor)
     }
@@ -244,7 +244,7 @@ impl<'de> de::VariantAccess<'de> for EnumAccess<'_, 'de> {
     {
         let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom("Expected '='".into()));
+            return Err(YsonError::Message("Expected '='".into()));
         }
         de::Deserializer::deserialize_map(self.de, visitor)
     }
@@ -369,7 +369,7 @@ impl<'de> MapAccess<'de> for CommaSeparated<'_, 'de> {
     {
         let token = self.de.reader.next_token()?;
         if token != Token::KeyValueSeparator {
-            return Err(YsonError::Custom(format!("Expected '=', got {token:?}")));
+            return Err(YsonError::Message(format!("Expected '=', got {token:?}")));
         }
 
         seed.deserialize(&mut *self.de)

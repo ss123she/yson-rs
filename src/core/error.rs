@@ -17,7 +17,12 @@ pub enum YsonError {
     #[error("Invalid binary marker 0x{0:x} at position {1}")]
     InvalidMarker(u8, usize),
 
-    /// A catch-all for custom errors produced by `serde` or the user's data types.
+    /// A diagnostic this crate generated itself.
+    #[error("{0}")]
+    Message(String),
+
+    /// An error passed in from serde or the user's data types through
+    /// `serde::Error::custom`.
     #[error("Custom error from serde: {0}")]
     Custom(String),
 }

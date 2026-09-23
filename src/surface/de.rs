@@ -50,7 +50,7 @@ impl<'de> Deserializer<'de> {
         match self.reader.peek_byte() {
             Err(YsonError::Eof) => Ok(()),
             Err(e) => Err(e),
-            Ok(_) => Err(YsonError::Custom(format!(
+            Ok(_) => Err(YsonError::Message(format!(
                 "Trailing data after the value, at offset {}",
                 self.reader.position()
             ))),
@@ -60,7 +60,7 @@ impl<'de> Deserializer<'de> {
     pub(crate) fn enter_recursion(&mut self) -> Result<(), YsonError> {
         self.depth += 1;
         if self.depth > self.max_depth {
-            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+            return Err(YsonError::Message("Recursion limit exceeded".into()));
         }
         Ok(())
     }
@@ -87,7 +87,7 @@ impl<'de> Deserializer<'de> {
                 self.reader.next_token()?;
                 continue;
             }
-            return Err(YsonError::Custom(format!(
+            return Err(YsonError::Message(format!(
                 "Expected '{}' to close the container, found more items at offset {}",
                 end_byte as char,
                 self.reader.position()
@@ -128,7 +128,7 @@ impl<'de> Deserializer<'de> {
                     _ => {}
                 }
                 if attr_depth > self.max_depth {
-                    return Err(YsonError::Custom("Attributes nesting too deep".into()));
+                    return Err(YsonError::Message("Attributes nesting too deep".into()));
                 }
             }
             self.leave_recursion();
@@ -197,7 +197,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Token::BeginList => self.visit_seq_container(visitor),
             Token::BeginMap => self.visit_map_container(b'}', visitor),
             Token::BeginAttributes => self.visit_map_container(b'>', visitor),
-            t => Err(YsonError::Custom(format!("Unexpected token: {t:?}"))),
+            t => Err(YsonError::Message(format!("Unexpected token: {t:?}"))),
         }
     }
 
@@ -286,7 +286,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
             match self.reader.next_token()? {
                 Token::EndMap => Ok(val),
-                t => Err(YsonError::Custom(format!(
+                t => Err(YsonError::Message(format!(
                     "Expected '}}' after variant, got {t:?}"
                 ))),
             }

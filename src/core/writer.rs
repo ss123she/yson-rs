@@ -286,7 +286,7 @@ impl<'a> Writer<'a> {
         max: usize,
     ) -> Result<(), YsonError> {
         if depth > max {
-            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+            return Err(YsonError::Message("Recursion limit exceeded".into()));
         }
 
         if let Some(attributes) = &value.attributes {
@@ -311,7 +311,7 @@ impl<'a> Writer<'a> {
         max: usize,
     ) -> Result<(), YsonError> {
         if depth > max {
-            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+            return Err(YsonError::Message("Recursion limit exceeded".into()));
         }
 
         match node {

@@ -289,7 +289,7 @@ impl<R: Read> FrameReader<R> {
             // The record in flight does not fit. Doubling is fine; chasing a
             // corrupt length prefix into an OOM abort is not.
             if self.buf.len() >= self.max_record_bytes {
-                return Err(YsonError::Custom(format!(
+                return Err(YsonError::Message(format!(
                     "record at offset {} exceeds the {}-byte limit",
                     self.base_offset, self.max_record_bytes
                 )));
@@ -310,7 +310,7 @@ impl<R: Read> FrameReader<R> {
                 }
                 // A signal interrupted the read and nothing was consumed.
                 Err(e) if e.kind() == ErrorKind::Interrupted => {}
-                Err(e) => return Err(YsonError::Custom(format!("read failed: {e}"))),
+                Err(e) => return Err(YsonError::Message(format!("read failed: {e}"))),
             }
         }
     }

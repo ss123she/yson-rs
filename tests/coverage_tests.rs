@@ -70,7 +70,7 @@ mod coverage_tests {
         }
 
         let res: Result<YsonValue, _> = from_slice(deeply_nested.as_bytes(), YsonFormat::Text);
-        assert!(matches!(res, Err(YsonError::Custom(_))));
+        assert!(matches!(res, Err(YsonError::Message(_))));
     }
 
     #[test]
@@ -484,7 +484,7 @@ mod coverage_tests {
         let res: Result<String, _> = from_slice(&data, YsonFormat::Binary);
 
         assert!(res.is_err());
-        if let Err(YsonError::Custom(msg)) = res {
+        if let Err(YsonError::Message(msg)) = res {
             assert_eq!(msg, "String length cannot be negative");
         }
     }

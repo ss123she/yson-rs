@@ -161,7 +161,7 @@ impl<'a> Reader<'a> {
 
     fn read_value_at(&mut self, depth: usize, max: usize) -> Result<YsonValue<'a>, YsonError> {
         if depth > max {
-            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+            return Err(YsonError::Message("Recursion limit exceeded".into()));
         }
 
         let attributes = if self.peek_byte()? == b'<' {
@@ -185,7 +185,7 @@ impl<'a> Reader<'a> {
             Token::String(s) => Ok(YsonNode::String(s)),
             Token::BeginList => {
                 if depth + 1 > max {
-                    return Err(YsonError::Custom("Recursion limit exceeded".into()));
+                    return Err(YsonError::Message("Recursion limit exceeded".into()));
                 }
                 let mut items = Vec::new();
                 loop {
@@ -203,13 +203,13 @@ impl<'a> Reader<'a> {
                 Ok(YsonNode::List(items))
             }
             Token::BeginMap => Ok(YsonNode::Map(self.read_pairs(b'}', depth + 1, max)?)),
-            t => Err(YsonError::Custom(format!("Unexpected token: {t:?}"))),
+            t => Err(YsonError::Message(format!("Unexpected token: {t:?}"))),
         }
     }
 
     fn read_pairs(&mut self, end: u8, depth: usize, max: usize) -> Result<YsonMap<'a>, YsonError> {
         if depth > max {
-            return Err(YsonError::Custom("Recursion limit exceeded".into()));
+            return Err(YsonError::Message("Recursion limit exceeded".into()));
         }
 
         let mut entries = YsonMap::new();
@@ -226,12 +226,12 @@ impl<'a> Reader<'a> {
 
             let key = match self.next_token()? {
                 Token::String(s) => s,
-                t => return Err(YsonError::Custom(format!("Expected a key, got {t:?}"))),
+                t => return Err(YsonError::Message(format!("Expected a key, got {t:?}"))),
             };
 
             match self.next_token()? {
                 Token::KeyValueSeparator => {}
-                t => return Err(YsonError::Custom(format!("Expected '=', got {t:?}"))),
+                t => return Err(YsonError::Message(format!("Expected '=', got {t:?}"))),
             }
 
             entries.insert(key, self.read_value_at(depth, max)?);
@@ -259,7 +259,9 @@ impl<'a> Reader<'a> {
                     varint::read_varint(&self.input[self.pos..]).map_err(|e| self.absolute(e))?;
                 self.pos += read;
                 if len < 0 {
-                    return Err(YsonError::Custom("String length cannot be negative".into()));
+                    return Err(YsonError::Message(
+                        "String length cannot be negative".into(),
+                    ));
                 }
                 let len = len as usize;
                 let s = self
@@ -479,18 +481,18 @@ impl<'a> Reader<'a> {
         let slice = &self.input[start..self.pos];
 
         let s = std::str::from_utf8(slice)
-            .map_err(|_| YsonError::Custom("Invalid UTF-8 in number".into()))?;
+            .map_err(|_| YsonError::Message("Invalid UTF-8 in number".into()))?;
 
         if is_unsigned {
             let val = s
                 .trim_end_matches('u')
                 .parse::<u64>()
-                .map_err(|_| YsonError::Custom(format!("Invalid uint64: {s}")))?;
+                .map_err(|_| YsonError::Message(format!("Invalid uint64: {s}")))?;
             Ok(Token::Uint64(val))
         } else if has_dot_or_exp {
             let val = s
                 .parse::<f64>()
-                .map_err(|_| YsonError::Custom(format!("Invalid double: {s}")))?;
+                .map_err(|_| YsonError::Message(format!("Invalid double: {s}")))?;
             Ok(Token::Double(val))
         } else {
             // A bare decimal is a text form of *both* int64 and uint64, so one
@@ -502,7 +504,7 @@ impl<'a> Reader<'a> {
                 Err(_) => s
                     .parse::<u64>()
                     .map(Token::Uint64)
-                    .map_err(|_| YsonError::Custom(format!("Invalid int64: {s}"))),
+                    .map_err(|_| YsonError::Message(format!("Invalid int64: {s}"))),
             }
         }
     }
@@ -520,7 +522,7 @@ impl<'a> Reader<'a> {
 
         let slice = &self.input[start..self.pos];
         if slice.is_empty() {
-            return Err(YsonError::Custom("Empty unquoted string".into()));
+            return Err(YsonError::Message("Empty unquoted string".into()));
         }
 
         Ok(Token::String(Cow::Borrowed(slice)))
@@ -551,7 +553,7 @@ impl<'a> Reader<'a> {
             return Err(YsonError::UnexpectedEof(self.pos));
         }
 
-        Err(YsonError::Custom(
+        Err(YsonError::Message(
             "Invalid special value: expected 'true', 'false', 'nan', 'inf' or '-inf' after '%'"
                 .into(),
         ))
@@ -596,10 +598,10 @@ fn decode_escapes(raw: &[u8]) -> Result<Vec<u8>, YsonError> {
                     return Err(YsonError::UnexpectedEof(i));
                 }
                 let hex = std::str::from_utf8(&raw[i + 1..i + 3])
-                    .map_err(|_| YsonError::Custom("Invalid hex escape".into()))?;
+                    .map_err(|_| YsonError::Message("Invalid hex escape".into()))?;
                 out.push(
                     u8::from_str_radix(hex, 16)
-                        .map_err(|_| YsonError::Custom("Invalid hex escape".into()))?,
+                        .map_err(|_| YsonError::Message("Invalid hex escape".into()))?,
                 );
                 i += 2;
             }

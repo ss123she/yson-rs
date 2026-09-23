@@ -5,7 +5,7 @@ use crate::core::error::YsonError;
 /// # Errors
 ///
 /// Returns [`YsonError::UnexpectedEof`] if the input ends mid-varint, with the
-/// offset relative to `input`, and [`YsonError::Custom`] if the payload
+/// offset relative to `input`, and [`YsonError::Message`] if the payload
 /// encodes more than 64 bits.
 #[inline]
 pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
@@ -17,10 +17,10 @@ pub fn read_uvarint(input: &[u8]) -> Result<(u64, usize), YsonError> {
         // bit 63 and nothing else. Anything above that does not fit in a u64.
         if i == 9 {
             if (byte & 0x80) != 0 {
-                return Err(YsonError::Custom("Varint too long (overflow u64)".into()));
+                return Err(YsonError::Message("Varint too long (overflow u64)".into()));
             }
             if byte > 0x01 {
-                return Err(YsonError::Custom(
+                return Err(YsonError::Message(
                     "Varint payload does not fit in u64".into(),
                 ));
             }
